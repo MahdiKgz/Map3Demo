@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: Dana;
+  src: url("./assets/fonts/DanaReg.ttf");
+}
+
+body {
+  direction: rtl !important;
+  color: white;
+  font-family: Dana;
+  overflow: hidden;
+}
+
+/* استایل اسلایدر سفارشی */
+input[type="range"].custom-range {
+  -webkit-appearance: none; /* حذف استایل پیشفرض */
+  appearance: none;
+  height: 6px;
+  background: linear-gradient(to right, #22c55e, #3b82f6);
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+  transition: background 0.3s ease;
+}
+
+/* نوار (track) */
+input[type="range"].custom-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 9999px;
+}
+
+input[type="range"].custom-range::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+}
+
+/* دکمه (thumb) */
+input[type="range"].custom-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: white;
+  border: 2px solid #22c55e;
+  transition: transform 0.2s ease, background 0.3s ease;
+}
+
+input[type="range"].custom-range::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  background: #22c55e;
+}
+
+input[type="range"].custom-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: white;
+  border: 2px solid #22c55e;
+  transition: transform 0.2s ease, background 0.3s ease;
+}
