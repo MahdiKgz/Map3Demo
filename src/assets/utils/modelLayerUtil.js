@@ -2,11 +2,62 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/Addons.js";
 import * as turf from "@turf/turf";
 
-export function createModelLayer({ id, url, route, speed, color }) {
-  const line = turf.lineString(route);
-  const lineDistance = turf.length(line, { units: "kilometers" });
+export function createModelLayer({
+  id,
+  url,
+  route,
+  speed,
+  onMove,
+  getSpeed,
+  getRoute,
+  modelScale = [0.005, 0.005, 0.005],
+}) {
+  let currentRoute = route;
+  let line = turf.lineString(currentRoute);
+  let lineDistance = turf.length(line, { units: "kilometers" });
   let progress = 0;
   let modelScene = null;
+  let lastTs = 0;
+  let prevLon = route?.[0]?.[0] ?? 0;
+  let prevLat = route?.[0]?.[1] ?? 0;
+  let prevBearing = 0;
+  // Overall intended route direction (start -> end)
+  let overallBearing = (() => {
+    if (Array.isArray(currentRoute) && currentRoute.length >= 2) {
+      return turf.bearing(
+        turf.point(currentRoute[0]),
+        turf.point(currentRoute[currentRoute.length - 1])
+      );
+    }
+    return 0;
+  })();
+
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  function normalizeAngleDeg(deg) {
+    let a = deg % 360;
+    if (a > 180) a -= 360;
+    if (a < -180) a += 360;
+    return a;
+  }
+
+  function angleDiff(a, b) {
+    return Math.abs(normalizeAngleDeg(a - b));
+  }
+
+  function routesDiffer(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length)
+      return true;
+    const a0 = a[0] || [];
+    const b0 = b[0] || [];
+    const al = a[a.length - 1] || [];
+    const bl = b[b.length - 1] || [];
+    return (
+      a0[0] !== b0[0] || a0[1] !== b0[1] || al[0] !== bl[0] || al[1] !== bl[1]
+    );
+  }
 
   return {
     id: `3d-model-${id}`,
@@ -23,7 +74,7 @@ export function createModelLayer({ id, url, route, speed, color }) {
       const loader = new GLTFLoader();
       loader.load(url, (gltf) => {
         modelScene = gltf.scene;
-        modelScene.scale.set(0.005, 0.005, 0.005);
+        modelScene.scale.set(...modelScale);
         this.scene.add(modelScene);
       });
       this.map = map;
@@ -36,18 +87,79 @@ export function createModelLayer({ id, url, route, speed, color }) {
     },
     render(gl, args) {
       if (!modelScene) return;
-      progress += speed;
+
+      if (typeof getRoute === "function") {
+        const latestRoute = getRoute();
+        if (latestRoute && routesDiffer(latestRoute, currentRoute)) {
+          currentRoute = latestRoute;
+          line = turf.lineString(currentRoute);
+          lineDistance = turf.length(line, { units: "kilometers" });
+          overallBearing = turf.bearing(
+            turf.point(currentRoute[0]),
+            turf.point(currentRoute[currentRoute.length - 1])
+          );
+          progress = Math.min(Math.max(progress, 0), 1);
+        }
+      }
+
+      const now = performance.now();
+      const dt = lastTs ? now - lastTs : 16.67;
+      lastTs = now;
+      const currentSpeed =
+        typeof getSpeed === "function" ? getSpeed() : speed || 0.0002;
+      const frameScale = dt / 16.67;
+      progress += currentSpeed * frameScale;
       if (progress > 1) progress = 0;
+
       const along = turf.along(line, lineDistance * progress, {
         units: "kilometers",
       });
-      const coords = along.geometry.coordinates;
-      const nextPoint = turf.along(line, lineDistance * (progress + 0.001), {
+      const coords = along?.geometry?.coordinates;
+      if (!coords) return;
+
+      // Time-based exponential smoothing factors (ms time constants)
+      const posTimeConstantMs = 120;
+      const rotTimeConstantMs = 90;
+      const alphaPos = 1 - Math.exp(-dt / Math.max(1, posTimeConstantMs));
+      const alphaRot = 1 - Math.exp(-dt / Math.max(1, rotTimeConstantMs));
+
+      const targetLon = coords[0];
+      const targetLat = coords[1];
+
+      // Choose forward direction that best aligns with overall route direction
+      const eps = Math.max(0.0005, 0.001 * (1 / Math.max(lineDistance, 1e-6)));
+      const fwdP = (progress + eps) % 1;
+      const backP = (progress - eps + 1) % 1;
+      const nextFwd = turf.along(line, lineDistance * fwdP, {
         units: "kilometers",
       });
-      const bearing = turf.bearing(turf.point(coords), nextPoint);
-      modelScene.rotation.set(0, THREE.MathUtils.degToRad(bearing), 0);
-      const modelMatrix = this.map.transform.getMatrixForModel(coords, 0);
+      const nextBack = turf.along(line, lineDistance * backP, {
+        units: "kilometers",
+      });
+      const bFwd = turf.bearing(turf.point(coords), nextFwd);
+      const bBack = turf.bearing(turf.point(coords), nextBack);
+      const chosenBearing =
+        angleDiff(bFwd, overallBearing) <= angleDiff(bBack, overallBearing)
+          ? bFwd
+          : bBack;
+
+      // Smooth rotation along shortest path
+      const delta = normalizeAngleDeg(chosenBearing - prevBearing);
+      prevBearing = prevBearing + delta * alphaRot;
+
+      // Smooth position
+      prevLon = lerp(prevLon, targetLon, alphaPos);
+      prevLat = lerp(prevLat, targetLat, alphaPos);
+      const smoothedCoords = [prevLon, prevLat];
+
+      if (onMove) onMove(smoothedCoords, prevBearing);
+
+      modelScene.rotation.set(0, THREE.MathUtils.degToRad(prevBearing), 0);
+
+      const modelMatrix = this.map.transform.getMatrixForModel(
+        smoothedCoords,
+        0
+      );
       const m = new THREE.Matrix4().fromArray(
         args.defaultProjectionData.mainMatrix
       );

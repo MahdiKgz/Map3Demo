@@ -2,10 +2,12 @@ import React, { useEffect, useRef } from "react";
 import { gsap } from "gsap";
 import CloseIcon from "../icons/CloseIcon";
 import ModelCard from "./ModelCard/ModelCard";
+import { useSelector } from "react-redux";
 
 function Sidebar({ isOpen = false, setIsOpen }) {
   const rootRef = useRef(null);
   const tweenRef = useRef(null);
+  const models = useSelector((state) => state.models.models);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -29,7 +31,7 @@ function Sidebar({ isOpen = false, setIsOpen }) {
   return (
     <div
       ref={rootRef}
-      className="w-sm h-[80%] bg-black/80 flex flex-col items-start gap-8 fixed left-4 inset-y-[100px] p-4 pr-6 rounded-lg"
+      className="w-sm h-[80%] bg-black/80 flex flex-col items-start gap-4 fixed left-4 inset-y-[100px] p-4 pr-6 rounded-lg overflow-y-scroll"
     >
       <div className="w-full flex items-center justify-between">
         <h1 className="text-xl font-semibold">مدیریت مدل ها</h1>
@@ -37,8 +39,10 @@ function Sidebar({ isOpen = false, setIsOpen }) {
           <CloseIcon />
         </button>
       </div>
-      <div className="w-full">
-        <ModelCard />
+      <div className="w-full flex flex-col gap-3">
+        {models.map((m) => (
+          <ModelCard key={m.id} model={m} />
+        ))}
       </div>
     </div>
   );
