@@ -11,6 +11,8 @@ export function createModelLayer({
   getSpeed,
   getRoute,
   modelScale = [0.005, 0.005, 0.005],
+  modelRotationOffset = 0,
+  autoFlip = true,
 }) {
   let currentRoute = route;
   let line = turf.lineString(currentRoute);
@@ -37,9 +39,8 @@ export function createModelLayer({
   }
 
   function normalizeAngleDeg(deg) {
-    let a = deg % 360;
-    if (a > 180) a -= 360;
-    if (a < -180) a += 360;
+    let a = ((deg % 360) + 360) % 360; // 0..359
+    if (a > 180) a -= 360; // -180..180
     return a;
   }
 
@@ -99,6 +100,9 @@ export function createModelLayer({
             turf.point(currentRoute[currentRoute.length - 1])
           );
           progress = Math.min(Math.max(progress, 0), 1);
+          // reset smoothing anchors to new start (avoid huge jumps)
+          prevLon = currentRoute[0][0];
+          prevLat = currentRoute[0][1];
         }
       }
 
@@ -136,12 +140,28 @@ export function createModelLayer({
       const nextBack = turf.along(line, lineDistance * backP, {
         units: "kilometers",
       });
-      const bFwd = turf.bearing(turf.point(coords), nextFwd);
-      const bBack = turf.bearing(turf.point(coords), nextBack);
-      const chosenBearing =
+
+      // ensure we pass points into bearing
+      const currentPoint = turf.point(coords);
+      const nextFwdPoint = turf.point(nextFwd.geometry.coordinates);
+      const nextBackPoint = turf.point(nextBack.geometry.coordinates);
+
+      const bFwd = turf.bearing(currentPoint, nextFwdPoint);
+      const bBack = turf.bearing(currentPoint, nextBackPoint);
+
+      let chosenBearing =
         angleDiff(bFwd, overallBearing) <= angleDiff(bBack, overallBearing)
           ? bFwd
           : bBack;
+
+      // Apply model rotation offset and auto-flip if needed
+      chosenBearing = normalizeAngleDeg(chosenBearing + modelRotationOffset);
+      if (autoFlip) {
+        const diffToOverall = angleDiff(chosenBearing, overallBearing);
+        if (diffToOverall > 90) {
+          chosenBearing = normalizeAngleDeg(chosenBearing + 180);
+        }
+      }
 
       // Smooth rotation along shortest path
       const delta = normalizeAngleDeg(chosenBearing - prevBearing);
@@ -154,6 +174,7 @@ export function createModelLayer({
 
       if (onMove) onMove(smoothedCoords, prevBearing);
 
+      // Set only yaw (rotation around Y)
       modelScene.rotation.set(0, THREE.MathUtils.degToRad(prevBearing), 0);
 
       const modelMatrix = this.map.transform.getMatrixForModel(

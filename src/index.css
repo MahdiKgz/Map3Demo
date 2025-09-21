@@ -12,6 +12,9 @@ body {
   overflow: hidden;
 }
 
+*::-webkit-scrollbar {
+  display: none;
+}
 /* استایل اسلایدر سفارشی */
 input[type="range"].custom-range {
   -webkit-appearance: none; /* حذف استایل پیشفرض */

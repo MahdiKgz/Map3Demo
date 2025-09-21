@@ -5,13 +5,14 @@ import { useSelector } from "react-redux";
 import { createModelLayer } from "../utils/modelLayerUtil";
 import { createAirplaneLayer } from "../utils/airplaneLayerUtil";
 import { createSatelliteLayer } from "../utils/satelliteLayerUtil";
+import { createThreeBuildingsLayer } from "../utils/threeBuildingsLayerUtil";
+import { buildingPoints } from "../constants/buildingConstants";
 
 export default function Map() {
   const mapRef = useRef(null);
   const models = useSelector((state) => state.models.models);
   const chasedModelId = useSelector((state) => state.models.chasedModelId);
 
-  // Refs to always expose latest state to custom layers
   const modelsRef = useRef(models);
   const chasedRef = useRef(chasedModelId);
   const lastFollowTsRef = useRef(0);
@@ -27,8 +28,7 @@ export default function Map() {
   useEffect(() => {
     const map = new maplibregl.Map({
       container: "map",
-      style:
-        "https://api.maptiler.com/maps/streets/style.json?key=ptfxXLdhtmf4nGINCED1",
+      style: "https://tiles.openfreemap.org/styles/bright",
       zoom: 16,
       center: [51.409623, 35.736233],
       pitch: 60,
@@ -38,7 +38,27 @@ export default function Map() {
 
     map.on("style.load", () => {
       map.setProjection({ type: "globe" });
-      // Add each route and model layer
+
+      const shaderCenter = buildingPoints.length
+        ? [buildingPoints[0].lng, buildingPoints[0].lat]
+        : map.getCenter()?.toArray?.() || [51.409623, 35.736233];
+
+      const buildings = buildingPoints.map((p) => ({
+        lng: p.lng,
+        lat: p.lat,
+        height: 50 + Math.random() * 50,
+        size: 18,
+      }));
+
+      const threeLayer = createThreeBuildingsLayer({
+        id: "three-buildings-custom",
+        centerLngLat: shaderCenter,
+        buildings,
+      });
+      if (!map.getLayer("three-buildings-custom")) {
+        map.addLayer(threeLayer);
+      }
+
       models.forEach((config) => {
         const routeSourceId = `route-${config.id}`;
         if (!map.getSource(routeSourceId)) {
@@ -56,6 +76,7 @@ export default function Map() {
               paint: { "line-color": config.color, "line-width": 4 },
             });
           }
+
           if (config.type === "airplane") {
             map.addLayer(
               createAirplaneLayer({
@@ -111,7 +132,6 @@ export default function Map() {
                 }
               },
             };
-            // Apply per-model scale only for moto-1
             if (config.id === "moto-1" && typeof config.scale === "number") {
               layerOptions.modelScale = [
                 config.scale,
@@ -145,12 +165,9 @@ export default function Map() {
       });
     });
 
-    return () => {
-      map.remove();
-    };
+    return () => map.remove();
   }, []);
 
-  // Update route sources when models change (without recreating map)
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;

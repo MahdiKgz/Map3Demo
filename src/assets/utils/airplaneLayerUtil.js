@@ -178,11 +178,13 @@ export function createAirplaneLayer({
       });
       const bFwd = turf.bearing(turf.point(coords), nextFwd);
       const bBack = turf.bearing(turf.point(coords), nextBack);
-      const chosenBearing =
+      let chosenBearing =
         Math.abs(((bFwd - overallBearing + 540) % 360) - 180) <=
         Math.abs(((bBack - overallBearing + 540) % 360) - 180)
           ? bFwd
           : bBack;
+      // Apply fixed offset of -60 degrees (equivalent to +120 - 180)
+      chosenBearing = ((chosenBearing - 60 + 540) % 360) - 180;
 
       // Time-based smoothing for heading and position
       const posTimeConstantMs = 120;
@@ -193,7 +195,7 @@ export function createAirplaneLayer({
       const targetLon = coords[0];
       const targetLat = coords[1];
 
-      const delta = normalizeAngleDeg(chosenBearing - prevBearing);
+      const delta = ((chosenBearing - prevBearing + 540) % 360) - 180;
       prevBearing = prevBearing + delta * alphaRot;
 
       prevLon = lerp(prevLon, targetLon, alphaPos);
