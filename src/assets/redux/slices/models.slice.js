@@ -165,7 +165,7 @@ const initialState = {
         line2:
           "2 25544  51.6442  21.8765 0007291  32.5541  84.1247 15.48987654321689",
       },
-      altitudeOffset: 500,
+      altitudeOffset: 500000,
       scale: 60000,
     },
     {

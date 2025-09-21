@@ -14,17 +14,6 @@ export function createAirplaneLayer({
 }) {
   const line = turf.lineString(route);
   const lineDistance = turf.length(line, { units: "kilometers" });
-  // Overall intended route direction (start -> end)
-  const overallBearing = (() => {
-    if (Array.isArray(route) && route.length >= 2) {
-      return turf.bearing(
-        turf.point(route[0]),
-        turf.point(route[route.length - 1])
-      );
-    }
-    return 0;
-  })();
-
   let progress = 0;
   let modelScene = null;
   let lastTs = 0;
@@ -43,7 +32,6 @@ export function createAirplaneLayer({
     return a;
   }
 
-  // Ground effects: shadow mapping and scanning ring
   let groundMesh, scanMesh;
   const groundMaterial = new THREE.MeshLambertMaterial({
     color: 0xf5f5f5,
@@ -96,7 +84,6 @@ export function createAirplaneLayer({
       const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
       this.scene.add(ambientLight);
 
-      // Directional light with shadow mapping (2 o'clock sun direction)
       const sunLight = new THREE.DirectionalLight(0xffffff, 1.5);
       sunLight.position.set(400, 500, -200);
       sunLight.castShadow = true;
@@ -110,13 +97,10 @@ export function createAirplaneLayer({
       sunLight.shadow.camera.bottom = -200;
       this.scene.add(sunLight);
 
-      // Airplane model
       const loader = new GLTFLoader();
       loader.load(url, (gltf) => {
         modelScene = gltf.scene;
-        // Apply user-defined scale
         modelScene.scale.setScalar(scale);
-        // Enable shadow casting
         modelScene.traverse((child) => {
           if (child.isMesh) {
             child.castShadow = true;
@@ -126,7 +110,6 @@ export function createAirplaneLayer({
         this.scene.add(modelScene);
       });
 
-      // Ground plane to receive shadows
       const groundGeometry = new THREE.PlaneGeometry(400, 400);
       groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
       groundMesh.rotation.x = -Math.PI / 2;
@@ -160,52 +143,41 @@ export function createAirplaneLayer({
       progress += currentSpeed * frameScale;
       if (progress > 1) progress = 0;
 
-      const along = turf.along(line, lineDistance * progress, {
-        units: "kilometers",
-      });
-      const coords = along?.geometry?.coordinates;
-      if (!coords) return;
+      // محاسبه اندیس و مقدار پیشرفت بین نقاط
+      const index = Math.floor(progress * (route.length - 1));
+      const nextIndex = (index + 1) % route.length;
+      const t = progress * (route.length - 1) - index;
 
-      // Choose forward direction that best aligns with overall route direction
-      const eps = Math.max(0.0005, 0.001 * (1 / Math.max(lineDistance, 1e-6)));
-      const fwdP = (progress + eps) % 1;
-      const backP = (progress - eps + 1) % 1;
-      const nextFwd = turf.along(line, lineDistance * fwdP, {
-        units: "kilometers",
-      });
-      const nextBack = turf.along(line, lineDistance * backP, {
-        units: "kilometers",
-      });
-      const bFwd = turf.bearing(turf.point(coords), nextFwd);
-      const bBack = turf.bearing(turf.point(coords), nextBack);
-      let chosenBearing =
-        Math.abs(((bFwd - overallBearing + 540) % 360) - 180) <=
-        Math.abs(((bBack - overallBearing + 540) % 360) - 180)
-          ? bFwd
-          : bBack;
-      // Apply fixed offset of -60 degrees (equivalent to +120 - 180)
-      chosenBearing = ((chosenBearing - 60 + 540) % 360) - 180;
+      const targetLon = lerp(route[index][0], route[nextIndex][0], t);
+      const targetLat = lerp(route[index][1], route[nextIndex][1], t);
 
-      // Time-based smoothing for heading and position
-      const posTimeConstantMs = 120;
+      // جهت درست بین دو نقطه
+      const currentPoint = turf.point([prevLon, prevLat]);
+      const nextPoint = turf.point([targetLon, targetLat]);
+      let chosenBearing = turf.bearing(currentPoint, nextPoint);
+
+      // تشخیص شرق-غرب یا شمال-جنوب
+      const absBearing = Math.abs(chosenBearing);
+      if (absBearing <= 45 || absBearing >= 135) {
+        // شمال به جنوب
+        chosenBearing += 90;
+      }
+
+      // smoothing چرخش
       const rotTimeConstantMs = 90;
-      const alphaPos = 1 - Math.exp(-dt / Math.max(1, posTimeConstantMs));
-      const alphaRot = 1 - Math.exp(-dt / Math.max(1, rotTimeConstantMs));
-
-      const targetLon = coords[0];
-      const targetLat = coords[1];
-
+      const alphaRot = 1 - Math.exp(-dt / rotTimeConstantMs);
       const delta = ((chosenBearing - prevBearing + 540) % 360) - 180;
-      prevBearing = prevBearing + delta * alphaRot;
+      prevBearing += delta * alphaRot;
 
+      // smoothing موقعیت
+      const posTimeConstantMs = 120;
+      const alphaPos = 1 - Math.exp(-dt / posTimeConstantMs);
       prevLon = lerp(prevLon, targetLon, alphaPos);
       prevLat = lerp(prevLat, targetLat, alphaPos);
-      const smoothedCoords = [prevLon, prevLat];
 
-      // Notify position for chase mode
+      const smoothedCoords = [prevLon, prevLat];
       if (onMove) onMove(smoothedCoords);
 
-      // Projection anchored at ground; local Y is meters
       const modelMatrix = this.map.transform.getMatrixForModel(
         smoothedCoords,
         0
@@ -216,14 +188,9 @@ export function createAirplaneLayer({
       const l = new THREE.Matrix4().fromArray(modelMatrix);
       this.camera.projectionMatrix = m.multiply(l);
 
-      // Place airplane and ground effects in local space
-      if (modelScene) {
-        modelScene.position.set(0, altitude, 0);
+      if (modelScene)
         modelScene.rotation.set(0, THREE.MathUtils.degToRad(prevBearing), 0);
-      }
-      if (groundMesh) {
-        groundMesh.position.set(0, 0.1, 0);
-      }
+      if (groundMesh) groundMesh.position.set(0, 0.1, 0);
       if (scanMesh) {
         scanMesh.position.set(0, 0.11, 0);
         scanMesh.material.uniforms.uTime.value += dt * 0.0003;
