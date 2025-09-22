@@ -53,6 +53,17 @@ export function createModelLayer({
         modelScene = gltf.scene;
         modelScene.scale.set(...modelScale);
         this.scene.add(modelScene);
+        // NOTE : here is the example of GLB/glTF modification
+        // modelScene.traverse((child) => {
+        //   console.log(child.name);
+        //   if (child.isMesh && child.name.includes("TailLight")) {
+        //     child.material.transparent = true;
+        //     child.material.opacity = 0.3;
+        //     child.material.color.set(0x99ccff);
+        //     child.material.roughness = 0.1;
+        //     child.material.metalness = 0.5;
+        //   }
+        // });
       });
       this.map = map;
       this.renderer = new THREE.WebGLRenderer({

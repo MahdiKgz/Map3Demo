@@ -31,7 +31,7 @@ export default function Map() {
       style: "https://tiles.openfreemap.org/styles/bright",
       zoom: 16,
       center: [51.409623, 35.736233],
-      pitch: 60,
+      pitch: 100,
       canvasContextAttributes: { antialias: true },
     });
     mapRef.current = map;
