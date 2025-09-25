@@ -31,7 +31,7 @@ function Sidebar({ isOpen = false, setIsOpen }) {
   return (
     <div
       ref={rootRef}
-      className="w-sm h-[80%] bg-black/80 flex flex-col items-start gap-4 fixed left-4 inset-y-[100px] p-4 pr-6 rounded-lg overflow-y-scroll"
+      className="w-sm h-[80%] bg-black/80 flex flex-col items-start gap-4 fixed left-4 inset-y-[100px] p-4 pr-6 rounded-lg overflow-y-scroll z-[9999]"
     >
       <div className="w-full flex items-center justify-between">
         <h1 className="text-xl font-semibold">مدیریت مدل ها</h1>

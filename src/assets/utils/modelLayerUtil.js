@@ -19,6 +19,8 @@ export function createModelLayer({
   let prevLon = route?.[0]?.[0] ?? 0;
   let prevLat = route?.[0]?.[1] ?? 0;
   let prevBearing = 0;
+  let startedSent = false;
+  let stopSent = false;
 
   function lerp(a, b, t) {
     return a + (b - a) * t;
@@ -92,8 +94,13 @@ export function createModelLayer({
       const currentSpeed =
         typeof getSpeed === "function" ? getSpeed() : speed || 0.0002;
       const frameScale = dt / 16.67;
+      // advance progress and detect wraparound
       progress += currentSpeed * frameScale;
-      if (progress > 1) progress = 0;
+      let wrapped = false;
+      if (progress > 1) {
+        progress = 0;
+        wrapped = true;
+      }
 
       const routeLen = currentRoute.length;
       const index = Math.floor(progress * (routeLen - 1));
@@ -126,7 +133,36 @@ export function createModelLayer({
       prevLat = lerp(prevLat, targetLat, alphaPos);
       const smoothedCoords = [prevLon, prevLat];
 
-      if (onMove) onMove(smoothedCoords, prevBearing);
+      // Determine phase for status message per requirements
+      let phase = null;
+      // 1) First point of route
+      if (index === 0 && t <= 0.02 && !startedSent) {
+        phase = "start";
+        startedSent = true;
+      }
+      // 2) Speed equals zero (emit once until moving again)
+      if (!phase) {
+        if (currentSpeed <= 0) {
+          if (!stopSent) {
+            phase = "stop";
+            stopSent = true;
+          }
+        } else {
+          stopSent = false;
+        }
+      }
+      // 3) End of route (wrap to start)
+      if (!phase && wrapped) {
+        phase = "end";
+        // Reset start flag to allow start message next lap
+        startedSent = false;
+      }
+      // 4) Otherwise, moving state (for UX to clear stop message)
+      if (!phase && currentSpeed > 0) {
+        phase = "moving";
+      }
+
+      if (onMove) onMove(smoothedCoords, prevBearing, phase);
       modelScene.rotation.set(0, THREE.MathUtils.degToRad(prevBearing), 0);
 
       const modelMatrix = this.map.transform.getMatrixForModel(

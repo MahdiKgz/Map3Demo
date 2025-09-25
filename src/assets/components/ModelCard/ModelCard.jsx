@@ -5,6 +5,7 @@ import {
   updateModelSpeed,
   setChasedModel,
 } from "../../redux/slices/models.slice";
+import { setChasedModelId } from "../../redux/slices/chase.slice";
 
 function ModelCard({ model }) {
   const dispatch = useDispatch();
@@ -36,7 +37,9 @@ function ModelCard({ model }) {
   }, [open]);
 
   const toggleChase = () => {
-    dispatch(setChasedModel(isChased ? null : model.id));
+    const next = isChased ? null : model.id;
+    dispatch(setChasedModel(next));
+    dispatch(setChasedModelId(next));
   };
 
   return (

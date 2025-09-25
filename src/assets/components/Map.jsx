@@ -8,6 +8,7 @@ import { createSatelliteLayer } from "../utils/satelliteLayerUtil";
 import { createThreeBuildingsLayer } from "../utils/threeBuildingsLayerUtil";
 import { buildingPoints } from "../constants/buildingConstants";
 import { updateStatus } from "../redux/slices/status.slice";
+import { updateChaseStatus } from "../redux/slices/chase.slice";
 
 export default function Map() {
   const mapRef = useRef(null);
@@ -63,8 +64,7 @@ export default function Map() {
       );
     };
 
-    map.on("zoom", updateStatusData);
-    // Update status on mouse move
+    // Update status on mouse move (always user-driven)
     map.on("mousemove", (e) => {
       const lngLat = e.lngLat;
       const zoom = map.getZoom();
@@ -79,13 +79,21 @@ export default function Map() {
       );
     });
 
-    // Update status on zoom change
-    map.on("zoom", updateStatusData);
-    map.on("zoomend", updateStatusData);
+    // Update status on zoom change (only when user interacts)
+    const onUserZoom = (e) => {
+      if (!e || !e.originalEvent) return;
+      updateStatusData();
+    };
+    map.on("zoom", onUserZoom);
+    map.on("zoomend", onUserZoom);
 
-    // Update status on move/pan
-    map.on("move", updateStatusData);
-    map.on("moveend", updateStatusData);
+    // Update status on move/pan (only when user interacts)
+    const onUserMove = (e) => {
+      if (!e || !e.originalEvent) return;
+      updateStatusData();
+    };
+    map.on("move", onUserMove);
+    map.on("moveend", onUserMove);
 
     // Initial status update
     updateStatusData();
@@ -114,6 +122,42 @@ export default function Map() {
       });
       if (!map.getLayer("three-buildings-custom")) {
         map.addLayer(threeLayer);
+      }
+
+      // Helper to tightly synchronize camera to a target coordinate
+      function chaseCameraTo(target, options = {}) {
+        const curCenter = map.getCenter();
+        const curBearing = map.getBearing();
+        const curZoom = map.getZoom();
+        const tgt = new maplibregl.LngLat(target[0], target[1]);
+        const cc = map.project(curCenter);
+        const tc = map.project(tgt);
+        const dx = tc.x - cc.x;
+        const dy = tc.y - cc.y;
+        const distPx = Math.hypot(dx, dy);
+        const targetZoom = options.zoom ?? curZoom;
+        const targetBearing = options.bearing ?? curBearing;
+
+        // Close: jump to avoid easing lag; Mid: short ease; Far: slightly longer ease
+        if (distPx < 4) {
+          map.jumpTo({ center: tgt, zoom: targetZoom, bearing: targetBearing });
+        } else if (distPx < 64) {
+          map.easeTo({
+            center: tgt,
+            zoom: targetZoom,
+            bearing: targetBearing,
+            duration: 120,
+            easing: (t) => t,
+          });
+        } else {
+          map.easeTo({
+            center: tgt,
+            zoom: targetZoom,
+            bearing: targetBearing,
+            duration: 220,
+            easing: (t) => 1 - (1 - t) * (1 - t),
+          });
+        }
       }
 
       models.forEach((config) => {
@@ -153,10 +197,13 @@ export default function Map() {
                   const now = Date.now();
                   if (
                     chasedRef.current === config.id &&
-                    now - lastFollowTsRef.current > 100
+                    now - lastFollowTsRef.current > 50
                   ) {
                     lastFollowTsRef.current = now;
-                    map.easeTo({ center: coords, zoom: 16, duration: 800 });
+                    chaseCameraTo(coords, { zoom: 16 });
+                    dispatch(
+                      updateChaseStatus({ lat: coords[1], lng: coords[0] })
+                    );
                   }
                 },
               })
@@ -173,19 +220,37 @@ export default function Map() {
                 );
                 return current ? current.speed : config.speed;
               },
-              onMove: (coords, bearingDeg) => {
+              onMove: (coords, bearingDeg, phase) => {
                 const now = Date.now();
                 if (
                   chasedRef.current === config.id &&
-                  now - lastFollowTsRef.current > 100
+                  now - lastFollowTsRef.current > 50
                 ) {
                   lastFollowTsRef.current = now;
-                  map.easeTo({
-                    center: coords,
-                    zoom: 20,
-                    bearing: bearingDeg,
-                    duration: 400,
-                  });
+                  chaseCameraTo(coords, { zoom: 20, bearing: bearingDeg });
+                  dispatch(
+                    updateChaseStatus({ lat: coords[1], lng: coords[0] })
+                  );
+                  if (phase === "start") {
+                    dispatch(
+                      updateChaseStatus({
+                        message: "وسیله نقلیه حرکت خود را شروع کرده",
+                      })
+                    );
+                  } else if (phase === "stop") {
+                    dispatch(
+                      updateChaseStatus({ message: "وسیله در مسیر توقف داشته" })
+                    );
+                  } else if (phase === "end") {
+                    dispatch(
+                      updateChaseStatus({
+                        message: "وسیله به پایان مسیر رسیده است",
+                      })
+                    );
+                  } else if (phase === "moving") {
+                    // Clear stop message when resuming movement
+                    dispatch(updateChaseStatus({ message: null }));
+                  }
                 }
               },
             };
