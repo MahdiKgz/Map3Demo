@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import maplibregl from "maplibre-gl";
+import maplibregl, { NavigationControl } from "maplibre-gl";
 import * as turf from "@turf/turf";
 import { useSelector, useDispatch } from "react-redux";
 import { createModelLayer } from "../utils/modelLayerUtil";
@@ -92,6 +92,9 @@ export default function Map() {
 
     map.on("style.load", () => {
       map.setProjection({ type: "globe" });
+
+      const nav = new NavigationControl({ visualizePitch: true });
+      map.addControl(nav, "top-right");
 
       const shaderCenter = buildingPoints.length
         ? [buildingPoints[0].lng, buildingPoints[0].lat]
