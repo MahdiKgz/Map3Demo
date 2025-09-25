@@ -1,15 +1,17 @@
 import React, { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import * as turf from "@turf/turf";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import { createModelLayer } from "../utils/modelLayerUtil";
 import { createAirplaneLayer } from "../utils/airplaneLayerUtil";
 import { createSatelliteLayer } from "../utils/satelliteLayerUtil";
 import { createThreeBuildingsLayer } from "../utils/threeBuildingsLayerUtil";
 import { buildingPoints } from "../constants/buildingConstants";
+import { updateStatus } from "../redux/slices/status.slice";
 
 export default function Map() {
   const mapRef = useRef(null);
+  const dispatch = useDispatch();
   const models = useSelector((state) => state.models.models);
   const chasedModelId = useSelector((state) => state.models.chasedModelId);
 
@@ -35,6 +37,58 @@ export default function Map() {
       canvasContextAttributes: { antialias: true },
     });
     mapRef.current = map;
+
+    // Add event listeners for status updates
+    function metersPerPixel(latitude, zoom) {
+      const earthCircumference = 40075016.686; // meters
+      const tileSize = 512; // style uses 512px tiles
+      const latRad = (latitude * Math.PI) / 180;
+      return (
+        (earthCircumference * Math.cos(latRad)) / (tileSize * Math.pow(2, zoom))
+      );
+    }
+
+    const updateStatusData = () => {
+      const center = map?.getCenter();
+      const zoom = map?.getZoom();
+      const scale = metersPerPixel(center.lat, zoom);
+
+      dispatch(
+        updateStatus({
+          lat: center.lat,
+          lng: center.lng,
+          zoom: zoom,
+          scale: scale,
+        })
+      );
+    };
+
+    map.on("zoom", updateStatusData);
+    // Update status on mouse move
+    map.on("mousemove", (e) => {
+      const lngLat = e.lngLat;
+      const zoom = map.getZoom();
+      const scale = metersPerPixel(lngLat.lat, zoom);
+      dispatch(
+        updateStatus({
+          lat: lngLat.lat,
+          lng: lngLat.lng,
+          zoom: zoom,
+          scale: scale,
+        })
+      );
+    });
+
+    // Update status on zoom change
+    map.on("zoom", updateStatusData);
+    map.on("zoomend", updateStatusData);
+
+    // Update status on move/pan
+    map.on("move", updateStatusData);
+    map.on("moveend", updateStatusData);
+
+    // Initial status update
+    updateStatusData();
 
     map.on("style.load", () => {
       map.setProjection({ type: "globe" });
@@ -166,7 +220,7 @@ export default function Map() {
     });
 
     return () => map.remove();
-  }, []);
+  }, [dispatch]);
 
   useEffect(() => {
     const map = mapRef.current;
