@@ -17,6 +17,7 @@ export function createAirplaneLayer({
   let progress = 0;
   let modelScene = null;
   let lastTs = 0;
+  let lastRenderTs = 0;
   let prevLon = route?.[0]?.[0] ?? 0;
   let prevLat = route?.[0]?.[1] ?? 0;
   let prevBearing = 0;
@@ -178,14 +179,18 @@ export function createAirplaneLayer({
         turf.point([aheadLon, aheadLat])
       );
 
-      // smoothing چرخش
-      const rotTimeConstantMs = 90;
+      // Adaptive rotation smoothing based on speed
+      const baseRotTimeConstantMs = 90;
+      const speedFactor = Math.min(Math.max(currentSpeed * 1000, 0.1), 2.0);
+      const rotTimeConstantMs = baseRotTimeConstantMs / speedFactor;
       const alphaRot = 1 - Math.exp(-dt / rotTimeConstantMs);
       const delta = ((chosenBearing - prevBearing + 540) % 360) - 180;
       prevBearing += delta * alphaRot;
 
-      // smoothing موقعیت
-      const posTimeConstantMs = 120;
+      // Adaptive position smoothing based on speed
+      const basePosTimeConstantMs = 120;
+      const posSpeedFactor = Math.min(Math.max(currentSpeed * 1000, 0.1), 2.0);
+      const posTimeConstantMs = basePosTimeConstantMs / posSpeedFactor;
       const alphaPos = 1 - Math.exp(-dt / posTimeConstantMs);
       prevLon = lerp(prevLon, targetLon, alphaPos);
       prevLat = lerp(prevLat, targetLat, alphaPos);
@@ -215,9 +220,25 @@ export function createAirplaneLayer({
         scanMesh.material.uniforms.uTime.value += dt * 0.0003;
       }
 
+      // Optimize rendering performance with frame rate limiting
       this.renderer.resetState();
-      this.renderer.render(this.scene, this.camera);
-      this.map.triggerRepaint();
+
+      // Frame rate limiting - render at most 60 FPS
+      const renderInterval = 1000 / 60; // 16.67ms for 60 FPS
+      const timeSinceLastRender = now - lastRenderTs;
+
+      // Only render if there's significant movement or enough time has passed
+      const shouldRender =
+        timeSinceLastRender >= renderInterval &&
+        (Math.abs(targetLon - prevLon) > 0.000001 ||
+          Math.abs(targetLat - prevLat) > 0.000001 ||
+          Math.abs(chosenBearing - prevBearing) > 0.1);
+
+      if (shouldRender) {
+        lastRenderTs = now;
+        this.renderer.render(this.scene, this.camera);
+        this.map.triggerRepaint();
+      }
     },
   };
 }

@@ -101,16 +101,7 @@ export default function Map() {
 
     // Disable chase mode on user camera interaction
     const disableChaseOnUserInteraction = (e) => {
-      console.log(
-        "User interaction detected:",
-        e.type,
-        "chasedModel:",
-        chasedRef.current,
-        "hasOriginalEvent:",
-        !!e.originalEvent
-      );
       if (e && e.originalEvent && chasedRef.current) {
-        console.log("Disabling chase mode for model:", chasedRef.current);
         dispatch(setChasedModel(null));
         dispatch(setChasedModelId(null));
       }
@@ -133,7 +124,6 @@ export default function Map() {
     // Add click handler as fallback
     map.on("click", (e) => {
       if (chasedRef.current) {
-        console.log("Click detected - disabling chase mode");
         dispatch(setChasedModel(null));
         dispatch(setChasedModelId(null));
       }

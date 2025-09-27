@@ -20,6 +20,7 @@ export function createModelLayer({
   let totalDistanceMeters = 0;
   let modelScene = null;
   let lastTs = 0;
+  let lastRenderTs = 0;
   let prevLon = route?.[0]?.[0] ?? 0;
   let prevLat = route?.[0]?.[1] ?? 0;
   let prevBearing = 0;
@@ -69,10 +70,22 @@ export function createModelLayer({
     }
     // Clamp distance
     let d = Math.max(0, Math.min(distanceMeters, totalDistanceMeters));
-    // Find segment index via linear scan (routes are short); can be optimized if needed
+
+    // Use binary search for better performance on long routes
+    let left = 0;
+    let right = cumulativeDistances.length - 1;
     let i = 0;
-    while (i < cumulativeDistances.length - 1 && d > cumulativeDistances[i + 1])
-      i++;
+
+    while (left <= right) {
+      const mid = Math.floor((left + right) / 2);
+      if (cumulativeDistances[mid] <= d) {
+        i = mid;
+        left = mid + 1;
+      } else {
+        right = mid - 1;
+      }
+    }
+
     const segStart = cumulativeDistances[i];
     const segEnd = cumulativeDistances[i + 1] ?? totalDistanceMeters;
     const segLen = Math.max(segEnd - segStart, 1e-6);
@@ -180,7 +193,10 @@ export function createModelLayer({
         turf.point([aheadPos.lon, aheadPos.lat])
       );
 
-      const rotTimeConstantMs = 90;
+      // Adaptive rotation smoothing based on speed
+      const baseRotTimeConstantMs = 90;
+      const speedFactor = Math.min(Math.max(currentSpeed * 1000, 0.1), 2.0); // Scale factor based on speed
+      const rotTimeConstantMs = baseRotTimeConstantMs / speedFactor;
       const alphaRot = 1 - Math.exp(-dt / rotTimeConstantMs);
       const delta = ((chosenBearing - prevBearing + 540) % 360) - 180;
       prevBearing += delta * alphaRot;
@@ -233,9 +249,25 @@ export function createModelLayer({
       const l = new THREE.Matrix4().fromArray(modelMatrix);
       this.camera.projectionMatrix = m.multiply(l);
 
+      // Optimize rendering performance with frame rate limiting
       this.renderer.resetState();
-      this.renderer.render(this.scene, this.camera);
-      this.map.triggerRepaint();
+
+      // Frame rate limiting - render at most 60 FPS
+      const renderInterval = 1000 / 60; // 16.67ms for 60 FPS
+      const timeSinceLastRender = now - lastRenderTs;
+
+      // Only render if there's significant movement or enough time has passed
+      const shouldRender =
+        timeSinceLastRender >= renderInterval &&
+        (Math.abs(targetLon - prevLon) > 0.000001 ||
+          Math.abs(targetLat - prevLat) > 0.000001 ||
+          Math.abs(chosenBearing - prevBearing) > 0.1);
+
+      if (shouldRender) {
+        lastRenderTs = now;
+        this.renderer.render(this.scene, this.camera);
+        this.map.triggerRepaint();
+      }
     },
   };
 }
