@@ -10,10 +10,14 @@ export function createModelLayer({
   onMove,
   getSpeed,
   getRoute,
-  modelScale = [0.005, 0.005, 0.005],
+  modelScale = [0.01, 0.01, 0.01],
+  headingOffsetDeg, // optional manual heading offset for model forward axis
 }) {
   let currentRoute = route;
   let progress = 0;
+  // Distance table for accurate movement along street-like polylines
+  let cumulativeDistances = [];
+  let totalDistanceMeters = 0;
   let modelScene = null;
   let lastTs = 0;
   let prevLon = route?.[0]?.[0] ?? 0;
@@ -21,6 +25,9 @@ export function createModelLayer({
   let prevBearing = 0;
   let startedSent = false;
   let stopSent = false;
+  let modelHeadingOffsetDeg =
+    typeof headingOffsetDeg === "number" ? headingOffsetDeg : 0;
+  let headingResolved = typeof headingOffsetDeg === "number";
 
   function lerp(a, b, t) {
     return a + (b - a) * t;
@@ -36,6 +43,45 @@ export function createModelLayer({
     return (
       a0[0] !== b0[0] || a0[1] !== b0[1] || al[0] !== bl[0] || al[1] !== bl[1]
     );
+  }
+
+  function computeRouteDistances(r) {
+    cumulativeDistances = [0];
+    totalDistanceMeters = 0;
+    if (!Array.isArray(r) || r.length < 2) return;
+    for (let i = 1; i < r.length; i++) {
+      const a = r[i - 1];
+      const b = r[i];
+      const segKm = turf.distance(a, b, { units: "kilometers" });
+      const segMeters = segKm * 1000;
+      totalDistanceMeters += segMeters;
+      cumulativeDistances.push(totalDistanceMeters);
+    }
+  }
+
+  function positionAtDistance(distanceMeters) {
+    if (
+      !Array.isArray(currentRoute) ||
+      currentRoute.length < 2 ||
+      totalDistanceMeters === 0
+    ) {
+      return { lon: prevLon, lat: prevLat, index: 0, t: 0 };
+    }
+    // Clamp distance
+    let d = Math.max(0, Math.min(distanceMeters, totalDistanceMeters));
+    // Find segment index via linear scan (routes are short); can be optimized if needed
+    let i = 0;
+    while (i < cumulativeDistances.length - 1 && d > cumulativeDistances[i + 1])
+      i++;
+    const segStart = cumulativeDistances[i];
+    const segEnd = cumulativeDistances[i + 1] ?? totalDistanceMeters;
+    const segLen = Math.max(segEnd - segStart, 1e-6);
+    const t = (d - segStart) / segLen;
+    const a = currentRoute[i];
+    const b = currentRoute[(i + 1) % currentRoute.length];
+    const lon = lerp(a[0], b[0], t);
+    const lat = lerp(a[1], b[1], t);
+    return { lon, lat, index: i, t };
   }
 
   return {
@@ -54,6 +100,19 @@ export function createModelLayer({
       loader.load(url, (gltf) => {
         modelScene = gltf.scene;
         modelScene.scale.set(...modelScale);
+        // Heuristic: infer forward axis and set heading offset if not provided
+        if (!headingResolved) {
+          const bbox = new THREE.Box3().setFromObject(modelScene);
+          const size = new THREE.Vector3();
+          bbox.getSize(size);
+          // Common vehicle GLTFs face +X; if X extent > Z extent, assume +X forward → -90° offset to align with +Z bearing
+          if (size.x > size.z * 1.1) {
+            modelHeadingOffsetDeg = -90;
+          } else {
+            modelHeadingOffsetDeg = 0;
+          }
+          headingResolved = true;
+        }
         this.scene.add(modelScene);
         // NOTE : here is the example of GLB/glTF modification
         // modelScene.traverse((child) => {
@@ -74,6 +133,8 @@ export function createModelLayer({
         antialias: true,
       });
       this.renderer.autoClear = false;
+      // Precompute distances for accurate along-route motion
+      computeRouteDistances(currentRoute);
     },
     render(gl, args) {
       if (!modelScene) return;
@@ -85,6 +146,8 @@ export function createModelLayer({
           progress = Math.min(Math.max(progress, 0), 1);
           prevLon = currentRoute[0][0];
           prevLat = currentRoute[0][1];
+          computeRouteDistances(currentRoute);
+          startedSent = false;
         }
       }
 
@@ -102,25 +165,20 @@ export function createModelLayer({
         wrapped = true;
       }
 
-      const routeLen = currentRoute.length;
-      const index = Math.floor(progress * (routeLen - 1));
-      const nextIndex = (index + 1) % routeLen;
-      const t = progress * (routeLen - 1) - index;
+      // Map progress (0..1) to physical distance along route
+      const distanceAlong =
+        totalDistanceMeters * Math.min(Math.max(progress, 0), 1);
+      const pos = positionAtDistance(distanceAlong);
+      const targetLon = pos.lon;
+      const targetLat = pos.lat;
 
-      const targetLon = lerp(
-        currentRoute[index][0],
-        currentRoute[nextIndex][0],
-        t
+      // Compute forward bearing by comparing two points along the route
+      const aheadDist = Math.max(1.0, totalDistanceMeters * 0.002);
+      const aheadPos = positionAtDistance(distanceAlong + aheadDist);
+      let chosenBearing = turf.bearing(
+        turf.point([targetLon, targetLat]),
+        turf.point([aheadPos.lon, aheadPos.lat])
       );
-      const targetLat = lerp(
-        currentRoute[index][1],
-        currentRoute[nextIndex][1],
-        t
-      );
-
-      const currentPoint = turf.point([prevLon, prevLat]);
-      const nextPoint = turf.point([targetLon, targetLat]);
-      let chosenBearing = turf.bearing(currentPoint, nextPoint);
 
       const rotTimeConstantMs = 90;
       const alphaRot = 1 - Math.exp(-dt / rotTimeConstantMs);
@@ -135,8 +193,8 @@ export function createModelLayer({
 
       // Determine phase for status message per requirements
       let phase = null;
-      // 1) First point of route
-      if (index === 0 && t <= 0.02 && !startedSent) {
+      // 1) First point of route (near start of distance)
+      if (distanceAlong <= 1.0 && !startedSent) {
         phase = "start";
         startedSent = true;
       }
@@ -163,7 +221,11 @@ export function createModelLayer({
       }
 
       if (onMove) onMove(smoothedCoords, prevBearing, phase);
-      modelScene.rotation.set(0, THREE.MathUtils.degToRad(prevBearing), 0);
+      modelScene.rotation.set(
+        0,
+        THREE.MathUtils.degToRad(prevBearing + modelHeadingOffsetDeg),
+        0
+      );
 
       const modelMatrix = this.map.transform.getMatrixForModel(
         smoothedCoords,

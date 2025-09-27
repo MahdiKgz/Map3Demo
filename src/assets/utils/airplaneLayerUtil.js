@@ -11,26 +11,24 @@ export function createAirplaneLayer({
   scale = 1.0,
   getSpeed,
   onMove,
+  headingOffsetDeg,
 }) {
-  const line = turf.lineString(route);
-  const lineDistance = turf.length(line, { units: "kilometers" });
+  // route metrics (reserved for future use)
   let progress = 0;
   let modelScene = null;
   let lastTs = 0;
   let prevLon = route?.[0]?.[0] ?? 0;
   let prevLat = route?.[0]?.[1] ?? 0;
   let prevBearing = 0;
+  let modelHeadingOffsetDeg =
+    typeof headingOffsetDeg === "number" ? headingOffsetDeg : 0;
+  let headingResolved = typeof headingOffsetDeg === "number";
 
   function lerp(a, b, t) {
     return a + (b - a) * t;
   }
 
-  function normalizeAngleDeg(deg) {
-    let a = deg % 360;
-    if (a > 180) a -= 360;
-    if (a < -180) a += 360;
-    return a;
-  }
+  // normalizeAngleDeg reserved for future orientation corrections
 
   let groundMesh, scanMesh;
   const groundMaterial = new THREE.MeshLambertMaterial({
@@ -107,13 +105,25 @@ export function createAirplaneLayer({
             child.receiveShadow = true;
           }
         });
+        // Infer forward axis offset if not provided
+        if (!headingResolved) {
+          const bbox = new THREE.Box3().setFromObject(modelScene);
+          const size = new THREE.Vector3();
+          bbox.getSize(size);
+          if (size.x > size.z * 1.1) {
+            modelHeadingOffsetDeg = -90;
+          } else {
+            modelHeadingOffsetDeg = 0;
+          }
+          headingResolved = true;
+        }
         this.scene.add(modelScene);
       });
 
       const groundGeometry = new THREE.PlaneGeometry(400, 400);
       groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
       groundMesh.rotation.x = -Math.PI / 2;
-      groundMesh.position.y = 0.1;
+      groundMesh.position.y = Math.max(0.1, altitude * 0.0);
       groundMesh.receiveShadow = true;
       this.scene.add(groundMesh);
 
@@ -152,16 +162,21 @@ export function createAirplaneLayer({
       const targetLat = lerp(route[index][1], route[nextIndex][1], t);
 
       // جهت درست بین دو نقطه
-      const currentPoint = turf.point([prevLon, prevLat]);
-      const nextPoint = turf.point([targetLon, targetLat]);
-      let chosenBearing = turf.bearing(currentPoint, nextPoint);
-
-      // تشخیص شرق-غرب یا شمال-جنوب
-      const absBearing = Math.abs(chosenBearing);
-      if (absBearing <= 45 || absBearing >= 135) {
-        // شمال به جنوب
-        chosenBearing += 90;
+      // Compute forward bearing using a look-ahead point along route
+      let aheadT = t + 0.02;
+      let ai = index;
+      let ani = nextIndex;
+      if (aheadT > 1.0) {
+        ai = nextIndex;
+        ani = (ai + 1) % route.length;
+        aheadT = aheadT - 1.0;
       }
+      const aheadLon = lerp(route[ai][0], route[ani][0], aheadT);
+      const aheadLat = lerp(route[ai][1], route[ani][1], aheadT);
+      let chosenBearing = turf.bearing(
+        turf.point([targetLon, targetLat]),
+        turf.point([aheadLon, aheadLat])
+      );
 
       // smoothing چرخش
       const rotTimeConstantMs = 90;
@@ -189,7 +204,11 @@ export function createAirplaneLayer({
       this.camera.projectionMatrix = m.multiply(l);
 
       if (modelScene)
-        modelScene.rotation.set(0, THREE.MathUtils.degToRad(prevBearing), 0);
+        modelScene.rotation.set(
+          0,
+          THREE.MathUtils.degToRad(prevBearing + modelHeadingOffsetDeg),
+          0
+        );
       if (groundMesh) groundMesh.position.set(0, 0.1, 0);
       if (scanMesh) {
         scanMesh.position.set(0, 0.11, 0);

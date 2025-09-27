@@ -34,7 +34,7 @@ export default function Map() {
       style: "https://tiles.openfreemap.org/styles/bright",
       zoom: 16,
       center: [51.409623, 35.736233],
-      pitch: 100,
+      pitch: 60, // Adjusted pitch to a more reasonable value (0-85 degrees) for 3D viewing
       canvasContextAttributes: { antialias: true },
     });
     mapRef.current = map;
@@ -138,26 +138,12 @@ export default function Map() {
         const targetZoom = options.zoom ?? curZoom;
         const targetBearing = options.bearing ?? curBearing;
 
-        // Close: jump to avoid easing lag; Mid: short ease; Far: slightly longer ease
-        if (distPx < 4) {
-          map.jumpTo({ center: tgt, zoom: targetZoom, bearing: targetBearing });
-        } else if (distPx < 64) {
-          map.easeTo({
-            center: tgt,
-            zoom: targetZoom,
-            bearing: targetBearing,
-            duration: 120,
-            easing: (t) => t,
-          });
-        } else {
-          map.easeTo({
-            center: tgt,
-            zoom: targetZoom,
-            bearing: targetBearing,
-            duration: 220,
-            easing: (t) => 1 - (1 - t) * (1 - t),
-          });
-        }
+        // Skip if too close to avoid unnecessary repaints
+        if (distPx < 0.5) return;
+
+        // For smoother chase, use jumpTo for small incremental updates every frame
+        // This locks the camera more tightly without easing lag or interruptions
+        map.jumpTo({ center: tgt, zoom: targetZoom, bearing: targetBearing });
       }
 
       models.forEach((config) => {
@@ -193,17 +179,17 @@ export default function Map() {
                 },
                 altitude: config.altitude || 150,
                 scale: config.scale || 1.0,
+                headingOffsetDeg: 0,
                 onMove: (coords) => {
                   const now = Date.now();
-                  if (
-                    chasedRef.current === config.id &&
-                    now - lastFollowTsRef.current > 50
-                  ) {
-                    lastFollowTsRef.current = now;
+                  if (chasedRef.current === config.id) {
                     chaseCameraTo(coords, { zoom: 16 });
-                    dispatch(
-                      updateChaseStatus({ lat: coords[1], lng: coords[0] })
-                    );
+                    if (now - lastFollowTsRef.current > 50) {
+                      lastFollowTsRef.current = now;
+                      dispatch(
+                        updateChaseStatus({ lat: coords[1], lng: coords[0] })
+                      );
+                    }
                   }
                 },
               })
@@ -214,6 +200,7 @@ export default function Map() {
               url: config.url,
               route: config.route,
               speed: config.speed,
+              headingOffsetDeg: 180,
               getSpeed: () => {
                 const current = modelsRef.current.find(
                   (m) => m.id === config.id
@@ -222,34 +209,44 @@ export default function Map() {
               },
               onMove: (coords, bearingDeg, phase) => {
                 const now = Date.now();
-                if (
-                  chasedRef.current === config.id &&
-                  now - lastFollowTsRef.current > 50
-                ) {
-                  lastFollowTsRef.current = now;
+                if (chasedRef.current === config.id) {
+                  // Optional: Offset center slightly behind for "chase cam" feel
+                  // const behindDistKm = 0.005; // 5 meters behind
+                  // const behindPoint = turf.destination(
+                  //   turf.point(coords),
+                  //   behindDistKm,
+                  //   bearingDeg + 180,
+                  //   { units: "kilometers" }
+                  // ).geometry.coordinates;
+                  // chaseCameraTo(behindPoint, { zoom: 20, bearing: bearingDeg });
                   chaseCameraTo(coords, { zoom: 20, bearing: bearingDeg });
-                  dispatch(
-                    updateChaseStatus({ lat: coords[1], lng: coords[0] })
-                  );
-                  if (phase === "start") {
+                  if (now - lastFollowTsRef.current > 50) {
+                    lastFollowTsRef.current = now;
                     dispatch(
-                      updateChaseStatus({
-                        message: "وسیله نقلیه حرکت خود را شروع کرده",
-                      })
+                      updateChaseStatus({ lat: coords[1], lng: coords[0] })
                     );
-                  } else if (phase === "stop") {
-                    dispatch(
-                      updateChaseStatus({ message: "وسیله در مسیر توقف داشته" })
-                    );
-                  } else if (phase === "end") {
-                    dispatch(
-                      updateChaseStatus({
-                        message: "وسیله به پایان مسیر رسیده است",
-                      })
-                    );
-                  } else if (phase === "moving") {
-                    // Clear stop message when resuming movement
-                    dispatch(updateChaseStatus({ message: null }));
+                    if (phase === "start") {
+                      dispatch(
+                        updateChaseStatus({
+                          message: "وسیله نقلیه حرکت خود را شروع کرده",
+                        })
+                      );
+                    } else if (phase === "stop") {
+                      dispatch(
+                        updateChaseStatus({
+                          message: "وسیله در مسیر توقف داشته",
+                        })
+                      );
+                    } else if (phase === "end") {
+                      dispatch(
+                        updateChaseStatus({
+                          message: "وسیله به پایان مسیر رسیده است",
+                        })
+                      );
+                    } else if (phase === "moving") {
+                      // Clear stop message when resuming movement
+                      dispatch(updateChaseStatus({ message: null }));
+                    }
                   }
                 }
               },

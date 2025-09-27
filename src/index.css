@@ -22,7 +22,6 @@ body {
 *::-webkit-scrollbar {
   display: none;
 }
-/* استایل اسلایدر سفارشی */
 input[type="range"].custom-range {
   -webkit-appearance: none; /* حذف استایل پیشفرض */
   appearance: none;
@@ -34,18 +33,14 @@ input[type="range"].custom-range {
   transition: background 0.3s ease;
 }
 
-/* نوار (track) */
 input[type="range"].custom-range::-webkit-slider-runnable-track {
-  height: 6px;
   border-radius: 9999px;
 }
 
 input[type="range"].custom-range::-moz-range-track {
-  height: 6px;
   border-radius: 9999px;
 }
 
-/* دکمه (thumb) */
 input[type="range"].custom-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
