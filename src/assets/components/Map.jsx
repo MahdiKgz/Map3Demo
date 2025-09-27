@@ -8,7 +8,11 @@ import { createSatelliteLayer } from "../utils/satelliteLayerUtil";
 import { createThreeBuildingsLayer } from "../utils/threeBuildingsLayerUtil";
 import { buildingPoints } from "../constants/buildingConstants";
 import { updateStatus } from "../redux/slices/status.slice";
-import { updateChaseStatus } from "../redux/slices/chase.slice";
+import {
+  updateChaseStatus,
+  setChasedModelId,
+} from "../redux/slices/chase.slice";
+import { setChasedModel } from "../redux/slices/models.slice";
 
 export default function Map() {
   const mapRef = useRef(null);
@@ -95,6 +99,46 @@ export default function Map() {
     map.on("move", onUserMove);
     map.on("moveend", onUserMove);
 
+    // Disable chase mode on user camera interaction
+    const disableChaseOnUserInteraction = (e) => {
+      console.log(
+        "User interaction detected:",
+        e.type,
+        "chasedModel:",
+        chasedRef.current,
+        "hasOriginalEvent:",
+        !!e.originalEvent
+      );
+      if (e && e.originalEvent && chasedRef.current) {
+        console.log("Disabling chase mode for model:", chasedRef.current);
+        dispatch(setChasedModel(null));
+        dispatch(setChasedModelId(null));
+      }
+    };
+
+    // Listen for user camera interactions
+    map.on("pitch", disableChaseOnUserInteraction);
+    map.on("rotate", disableChaseOnUserInteraction);
+    map.on("zoom", disableChaseOnUserInteraction);
+    map.on("dragstart", disableChaseOnUserInteraction);
+    map.on("drag", disableChaseOnUserInteraction);
+    map.on("dragend", disableChaseOnUserInteraction);
+
+    // Handle move events separately to avoid conflicts
+    map.on("move", (e) => {
+      onUserMove(e);
+      disableChaseOnUserInteraction(e);
+    });
+
+    // Add click handler as fallback
+    map.on("click", (e) => {
+      if (chasedRef.current) {
+        console.log("Click detected - disabling chase mode");
+        dispatch(setChasedModel(null));
+        dispatch(setChasedModelId(null));
+      }
+    });
+
     // Initial status update
     updateStatusData();
 
@@ -179,7 +223,7 @@ export default function Map() {
                 },
                 altitude: config.altitude || 150,
                 scale: config.scale || 1.0,
-                headingOffsetDeg: 0,
+                headingOffsetDeg: 135,
                 onMove: (coords) => {
                   const now = Date.now();
                   if (chasedRef.current === config.id) {
@@ -200,7 +244,7 @@ export default function Map() {
               url: config.url,
               route: config.route,
               speed: config.speed,
-              headingOffsetDeg: 180,
+              headingOffsetDeg: -75,
               getSpeed: () => {
                 const current = modelsRef.current.find(
                   (m) => m.id === config.id

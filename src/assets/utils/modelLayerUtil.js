@@ -185,11 +185,7 @@ export function createModelLayer({
       const delta = ((chosenBearing - prevBearing + 540) % 360) - 180;
       prevBearing += delta * alphaRot;
 
-      const posTimeConstantMs = 120;
-      const alphaPos = 1 - Math.exp(-dt / posTimeConstantMs);
-      prevLon = lerp(prevLon, targetLon, alphaPos);
-      prevLat = lerp(prevLat, targetLat, alphaPos);
-      const smoothedCoords = [prevLon, prevLat];
+      const smoothedCoords = [targetLon, targetLat];
 
       // Determine phase for status message per requirements
       let phase = null;
