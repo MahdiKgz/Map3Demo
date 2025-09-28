@@ -149,7 +149,7 @@ export function createAirplaneLayer({
       const dt = lastTs ? now - lastTs : 16.67;
       lastTs = now;
       const currentSpeed =
-        typeof getSpeed === "function" ? getSpeed() : speed || 0.00025;
+        typeof getSpeed === "function" ? getSpeed() : speed || 0;
       const frameScale = dt / 16.67;
       progress += currentSpeed * frameScale;
       if (progress > 1) progress = 0;

@@ -25,8 +25,12 @@ const chaseSlice = createSlice({
       if (lng !== undefined) state.lng = lng;
       if (message !== undefined) state.message = message;
     },
+    clearChaseStatus: (state) => {
+      state.message = null;
+    },
   },
 });
 
-export const { setChasedModelId, updateChaseStatus } = chaseSlice.actions;
+export const { setChasedModelId, updateChaseStatus, clearChaseStatus } =
+  chaseSlice.actions;
 export default chaseSlice.reducer;

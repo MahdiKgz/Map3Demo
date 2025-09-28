@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import maplibregl, { NavigationControl } from "maplibre-gl";
 import * as turf from "@turf/turf";
 import { useSelector, useDispatch } from "react-redux";
+import { store } from "../redux/store";
 import { createModelLayer } from "../utils/modelLayerUtil";
 import { createAirplaneLayer } from "../utils/airplaneLayerUtil";
 import { createSatelliteLayer } from "../utils/satelliteLayerUtil";
@@ -11,8 +12,13 @@ import { updateStatus } from "../redux/slices/status.slice";
 import {
   updateChaseStatus,
   setChasedModelId,
+  clearChaseStatus,
 } from "../redux/slices/chase.slice";
-import { setChasedModel } from "../redux/slices/models.slice";
+import {
+  setChasedModel,
+  startAccident,
+  endAccident,
+} from "../redux/slices/models.slice";
 
 export default function Map() {
   const mapRef = useRef(null);
@@ -122,7 +128,7 @@ export default function Map() {
     });
 
     // Add click handler as fallback
-    map.on("click", (e) => {
+    map.on("click", () => {
       if (chasedRef.current) {
         dispatch(setChasedModel(null));
         dispatch(setChasedModelId(null));
@@ -209,7 +215,14 @@ export default function Map() {
                   const current = modelsRef.current.find(
                     (m) => m.id === config.id
                   );
-                  return current ? current.speed : config.speed;
+                  const baseSpeed = current ? current.speed : config.speed;
+                  // Return 0 speed during accidents - check Redux state
+                  const state = store.getState();
+                  const activeAccidents = state.models.activeAccidents || {};
+                  if (activeAccidents[config.id]) {
+                    return 0;
+                  }
+                  return baseSpeed;
                 },
                 altitude: config.altitude || 150,
                 scale: config.scale || 1.0,
@@ -235,11 +248,27 @@ export default function Map() {
               route: config.route,
               speed: config.speed,
               headingOffsetDeg: -75,
+              accidents: config.accidents || [],
+              onAccidentStart: (modelId, accident, startTime) => {
+                dispatch(startAccident({ modelId, accident, startTime }));
+              },
+              onAccidentEnd: (modelId) => {
+                dispatch(endAccident(modelId));
+                // Clear chase status messages when accident ends
+                dispatch(clearChaseStatus());
+              },
               getSpeed: () => {
                 const current = modelsRef.current.find(
                   (m) => m.id === config.id
                 );
-                return current ? current.speed : config.speed;
+                const baseSpeed = current ? current.speed : config.speed;
+                // Return 0 speed during accidents - check Redux state
+                const state = store.getState();
+                const activeAccidents = state.models.activeAccidents || {};
+                if (activeAccidents[config.id]) {
+                  return 0;
+                }
+                return baseSpeed;
               },
               onMove: (coords, bearingDeg, phase) => {
                 const now = Date.now();
@@ -319,8 +348,11 @@ export default function Map() {
     });
 
     return () => map.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatch]);
 
+  // Separate useEffect for route updates only (not speed changes)
+  const routeDependencies = models.map((m) => m.route).join(",");
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -330,7 +362,7 @@ export default function Map() {
         source.setData(turf.lineString(config.route));
       }
     });
-  }, [models]);
+  }, [routeDependencies, models]); // Only re-run when routes change
 
   return <div id="map" className="w-screen h-screen" />;
 }

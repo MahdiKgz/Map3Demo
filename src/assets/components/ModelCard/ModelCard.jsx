@@ -96,7 +96,7 @@ function ModelCard({ model }) {
               onChange={(e) => {
                 e.stopPropagation();
                 const v = Number(e.target.value);
-                const newSpeed = (v / 10) * 0.001;
+                const newSpeed = v === 0 ? 0 : (v / 10) * 0.001;
                 dispatch(updateModelSpeed({ id: model.id, speed: newSpeed }));
               }}
               onClick={(e) => e.stopPropagation()}

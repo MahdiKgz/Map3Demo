@@ -12,6 +12,9 @@ export function createModelLayer({
   getRoute,
   modelScale = [0.01, 0.01, 0.01],
   headingOffsetDeg, // optional manual heading offset for model forward axis
+  accidents = [], // accident configuration
+  onAccidentStart, // callback when accident starts
+  onAccidentEnd, // callback when accident ends
 }) {
   let currentRoute = route;
   let progress = 0;
@@ -29,6 +32,13 @@ export function createModelLayer({
   let modelHeadingOffsetDeg =
     typeof headingOffsetDeg === "number" ? headingOffsetDeg : 0;
   let headingResolved = typeof headingOffsetDeg === "number";
+
+  // Accident management
+  let currentAccident = null;
+  let accidentStartTime = 0;
+  let isInAccident = false;
+  let accidentPosition = null; // Store the exact accident position
+  let accidentTriggered = false; // Prevent multiple triggers per route pass
 
   function lerp(a, b, t) {
     return a + (b - a) * t;
@@ -164,11 +174,67 @@ export function createModelLayer({
         }
       }
 
-      const now = performance.now();
+      const now = Date.now();
       const dt = lastTs ? now - lastTs : 16.67;
       lastTs = now;
+
+      // Check if we're in an accident
+      if (isInAccident && currentAccident) {
+        const accidentElapsed = now - accidentStartTime;
+        if (accidentElapsed >= currentAccident.duration) {
+          // Accident ended, resume movement
+          isInAccident = false;
+          currentAccident = null;
+          if (onAccidentEnd) onAccidentEnd(id);
+        } else {
+          // Still in accident, don't move but keep rendering
+          // Use the accident position instead of route position
+          const smoothedCoords = accidentPosition
+            ? [accidentPosition.lon, accidentPosition.lat]
+            : [prevLon, prevLat];
+
+          // Update chase status with current position during accident
+          if (onMove) onMove(smoothedCoords, prevBearing, "accident");
+
+          // Keep the model visible at the accident location
+          modelScene.rotation.set(
+            0,
+            THREE.MathUtils.degToRad(prevBearing + modelHeadingOffsetDeg),
+            0
+          );
+
+          const modelMatrix = this.map.transform.getMatrixForModel(
+            smoothedCoords,
+            0
+          );
+          const m = new THREE.Matrix4().fromArray(
+            args.defaultProjectionData.mainMatrix
+          );
+          const l = new THREE.Matrix4().fromArray(modelMatrix);
+          this.camera.projectionMatrix = m.multiply(l);
+
+          // Optimize rendering performance with frame rate limiting
+          this.renderer.resetState();
+
+          // Frame rate limiting - render at most 60 FPS
+          const renderInterval = 1000 / 60; // 16.67ms for 60 FPS
+          const timeSinceLastRender = now - lastRenderTs;
+
+          // Only render if enough time has passed
+          const shouldRender = timeSinceLastRender >= renderInterval;
+
+          if (shouldRender) {
+            lastRenderTs = now;
+            this.renderer.render(this.scene, this.camera);
+            this.map.triggerRepaint();
+          }
+
+          return;
+        }
+      }
+
       const currentSpeed =
-        typeof getSpeed === "function" ? getSpeed() : speed || 0.0002;
+        typeof getSpeed === "function" ? getSpeed() : speed || 0;
       const frameScale = dt / 16.67;
       // advance progress and detect wraparound
       progress += currentSpeed * frameScale;
@@ -176,6 +242,8 @@ export function createModelLayer({
       if (progress > 1) {
         progress = 0;
         wrapped = true;
+        // Reset accident trigger flag when route wraps (new lap)
+        accidentTriggered = false;
       }
 
       // Map progress (0..1) to physical distance along route
@@ -202,6 +270,30 @@ export function createModelLayer({
       prevBearing += delta * alphaRot;
 
       const smoothedCoords = [targetLon, targetLat];
+
+      // Check for accident at current position
+      if (!isInAccident && !accidentTriggered && accidents.length > 0) {
+        for (const accident of accidents) {
+          const distance = turf.distance(
+            turf.point([targetLon, targetLat]),
+            turf.point(accident.coordinates),
+            { units: "meters" }
+          );
+
+          // If within 10 meters of accident point, trigger accident
+          if (distance <= 10) {
+            isInAccident = true;
+            accidentTriggered = true; // Prevent multiple triggers
+            currentAccident = accident;
+            accidentStartTime = now;
+            // Store the exact position where accident occurred
+            accidentPosition = { lon: targetLon, lat: targetLat };
+            if (onAccidentStart)
+              onAccidentStart(id, accident, accidentStartTime);
+            break;
+          }
+        }
+      }
 
       // Determine phase for status message per requirements
       let phase = null;

@@ -8,6 +8,13 @@ const initialState = {
       color: "#ff0000",
       speed: 0.0002,
       type: "vehicle",
+      accidents: [
+        {
+          coordinates: [51.4150977070006, 35.73655087046933],
+          duration: 60000, // 1 minute in milliseconds
+          message: "این وسیله نقلیه دچار تصادف شده و برای یک دقیقه متوقف است",
+        },
+      ],
       route: [
         [51.41289315407019, 35.73849852119572],
         [51.41451968397578, 35.737407406209755],
@@ -29,6 +36,13 @@ const initialState = {
       type: "airplane",
       altitude: 100,
       scale: 0.5,
+      accidents: [
+        {
+          coordinates: [51.41578331391091, 35.72762253525313],
+          duration: 30000, // 30 seconds
+          message: "این هواپیما دچار مشکل فنی شده و برای 30 ثانیه متوقف است",
+        },
+      ],
       route: [
         [51.4107518760224, 35.73372640732208],
         [51.41335145226475, 35.73440710755406],
@@ -260,6 +274,7 @@ const initialState = {
     },
   ],
   chasedModelId: null,
+  activeAccidents: {}, // Track active accidents by model ID
 };
 
 const modelsSlice = createSlice({
@@ -274,8 +289,21 @@ const modelsSlice = createSlice({
     setChasedModel: (state, action) => {
       state.chasedModelId = action.payload;
     },
+    startAccident: (state, action) => {
+      const { modelId, accident, startTime } = action.payload;
+      state.activeAccidents[modelId] = {
+        ...accident,
+        startTime: startTime || Date.now(),
+        isActive: true,
+      };
+    },
+    endAccident: (state, action) => {
+      const modelId = action.payload;
+      delete state.activeAccidents[modelId];
+    },
   },
 });
 
-export const { updateModelSpeed, setChasedModel } = modelsSlice.actions;
+export const { updateModelSpeed, setChasedModel, startAccident, endAccident } =
+  modelsSlice.actions;
 export default modelsSlice.reducer;
