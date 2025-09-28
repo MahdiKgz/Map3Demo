@@ -11,14 +11,13 @@ export function createModelLayer({
   getSpeed,
   getRoute,
   modelScale = [0.01, 0.01, 0.01],
-  headingOffsetDeg, // optional manual heading offset for model forward axis
-  accidents = [], // accident configuration
-  onAccidentStart, // callback when accident starts
-  onAccidentEnd, // callback when accident ends
+  headingOffsetDeg,
+  accidents = [],
+  onAccidentStart,
+  onAccidentEnd,
 }) {
   let currentRoute = route;
   let progress = 0;
-  // Distance table for accurate movement along street-like polylines
   let cumulativeDistances = [];
   let totalDistanceMeters = 0;
   let modelScene = null;
@@ -29,16 +28,18 @@ export function createModelLayer({
   let prevBearing = 0;
   let startedSent = false;
   let stopSent = false;
+  let smoothedProgress = 0;
+  let targetProgress = 0;
+  let velocity = 0;
+  let acceleration = 0;
   let modelHeadingOffsetDeg =
     typeof headingOffsetDeg === "number" ? headingOffsetDeg : 0;
   let headingResolved = typeof headingOffsetDeg === "number";
-
-  // Accident management
   let currentAccident = null;
   let accidentStartTime = 0;
   let isInAccident = false;
-  let accidentPosition = null; // Store the exact accident position
-  let accidentTriggered = false; // Prevent multiple triggers per route pass
+  let accidentPosition = null;
+  let accidentTriggered = false;
 
   function lerp(a, b, t) {
     return a + (b - a) * t;
@@ -78,14 +79,10 @@ export function createModelLayer({
     ) {
       return { lon: prevLon, lat: prevLat, index: 0, t: 0 };
     }
-    // Clamp distance
     let d = Math.max(0, Math.min(distanceMeters, totalDistanceMeters));
-
-    // Use binary search for better performance on long routes
     let left = 0;
     let right = cumulativeDistances.length - 1;
     let i = 0;
-
     while (left <= right) {
       const mid = Math.floor((left + right) / 2);
       if (cumulativeDistances[mid] <= d) {
@@ -95,13 +92,12 @@ export function createModelLayer({
         right = mid - 1;
       }
     }
-
     const segStart = cumulativeDistances[i];
     const segEnd = cumulativeDistances[i + 1] ?? totalDistanceMeters;
     const segLen = Math.max(segEnd - segStart, 1e-6);
     const t = (d - segStart) / segLen;
     const a = currentRoute[i];
-    const b = currentRoute[(i + 1) % currentRoute.length];
+    const b = currentRoute[Math.min(i + 1, currentRoute.length - 1)];
     const lon = lerp(a[0], b[0], t);
     const lat = lerp(a[1], b[1], t);
     return { lon, lat, index: i, t };
@@ -123,12 +119,10 @@ export function createModelLayer({
       loader.load(url, (gltf) => {
         modelScene = gltf.scene;
         modelScene.scale.set(...modelScale);
-        // Heuristic: infer forward axis and set heading offset if not provided
         if (!headingResolved) {
           const bbox = new THREE.Box3().setFromObject(modelScene);
           const size = new THREE.Vector3();
           bbox.getSize(size);
-          // Common vehicle GLTFs face +X; if X extent > Z extent, assume +X forward → -90° offset to align with +Z bearing
           if (size.x > size.z * 1.1) {
             modelHeadingOffsetDeg = -90;
           } else {
@@ -137,17 +131,6 @@ export function createModelLayer({
           headingResolved = true;
         }
         this.scene.add(modelScene);
-        // NOTE : here is the example of GLB/glTF modification
-        // modelScene.traverse((child) => {
-        //   console.log(child.name);
-        //   if (child.isMesh && child.name.includes("TailLight")) {
-        //     child.material.transparent = true;
-        //     child.material.opacity = 0.3;
-        //     child.material.color.set(0x99ccff);
-        //     child.material.roughness = 0.1;
-        //     child.material.metalness = 0.5;
-        //   }
-        // });
       });
       this.map = map;
       this.renderer = new THREE.WebGLRenderer({
@@ -156,53 +139,42 @@ export function createModelLayer({
         antialias: true,
       });
       this.renderer.autoClear = false;
-      // Precompute distances for accurate along-route motion
       computeRouteDistances(currentRoute);
     },
     render(gl, args) {
       if (!modelScene) return;
-
       if (typeof getRoute === "function") {
         const latestRoute = getRoute();
         if (latestRoute && routesDiffer(latestRoute, currentRoute)) {
           currentRoute = latestRoute;
           progress = Math.min(Math.max(progress, 0), 1);
+          smoothedProgress = progress;
+          targetProgress = progress;
           prevLon = currentRoute[0][0];
           prevLat = currentRoute[0][1];
           computeRouteDistances(currentRoute);
           startedSent = false;
         }
       }
-
       const now = Date.now();
       const dt = lastTs ? now - lastTs : 16.67;
       lastTs = now;
-
-      // Check if we're in an accident
       if (isInAccident && currentAccident) {
         const accidentElapsed = now - accidentStartTime;
         if (accidentElapsed >= currentAccident.duration) {
-          // Accident ended, resume movement
           isInAccident = false;
           currentAccident = null;
           if (onAccidentEnd) onAccidentEnd(id);
         } else {
-          // Still in accident, don't move but keep rendering
-          // Use the accident position instead of route position
           const smoothedCoords = accidentPosition
             ? [accidentPosition.lon, accidentPosition.lat]
             : [prevLon, prevLat];
-
-          // Update chase status with current position during accident
           if (onMove) onMove(smoothedCoords, prevBearing, "accident");
-
-          // Keep the model visible at the accident location
           modelScene.rotation.set(
             0,
             THREE.MathUtils.degToRad(prevBearing + modelHeadingOffsetDeg),
             0
           );
-
           const modelMatrix = this.map.transform.getMatrixForModel(
             smoothedCoords,
             0
@@ -212,66 +184,74 @@ export function createModelLayer({
           );
           const l = new THREE.Matrix4().fromArray(modelMatrix);
           this.camera.projectionMatrix = m.multiply(l);
-
-          // Optimize rendering performance with frame rate limiting
           this.renderer.resetState();
-
-          // Frame rate limiting - render at most 60 FPS
-          const renderInterval = 1000 / 60; // 16.67ms for 60 FPS
+          const renderInterval = 1000 / 60;
           const timeSinceLastRender = now - lastRenderTs;
-
-          // Only render if enough time has passed
           const shouldRender = timeSinceLastRender >= renderInterval;
-
           if (shouldRender) {
             lastRenderTs = now;
             this.renderer.render(this.scene, this.camera);
             this.map.triggerRepaint();
           }
-
           return;
         }
       }
-
       const currentSpeed =
         typeof getSpeed === "function" ? getSpeed() : speed || 0;
       const frameScale = dt / 16.67;
-      // advance progress and detect wraparound
-      progress += currentSpeed * frameScale;
+      targetProgress += currentSpeed * frameScale;
       let wrapped = false;
-      if (progress > 1) {
-        progress = 0;
+      if (targetProgress > 1) {
+        targetProgress = targetProgress % 1;
         wrapped = true;
-        // Reset accident trigger flag when route wraps (new lap)
         accidentTriggered = false;
       }
-
-      // Map progress (0..1) to physical distance along route
+      const progressDiff = targetProgress - smoothedProgress;
+      const maxAcceleration = 0.008;
+      const maxVelocity = currentSpeed * 1.5;
+      if (Math.abs(progressDiff) > 0.0005) {
+        const smoothFactor = 0.05;
+        acceleration =
+          Math.sign(progressDiff) *
+          Math.min(maxAcceleration, Math.abs(progressDiff) * smoothFactor);
+        velocity = Math.max(
+          -maxVelocity,
+          Math.min(maxVelocity, velocity + acceleration * frameScale)
+        );
+        smoothedProgress += velocity * frameScale;
+      } else {
+        velocity *= 0.95;
+        smoothedProgress = targetProgress;
+      }
+      progress = smoothedProgress;
       const distanceAlong =
         totalDistanceMeters * Math.min(Math.max(progress, 0), 1);
       const pos = positionAtDistance(distanceAlong);
       const targetLon = pos.lon;
       const targetLat = pos.lat;
-
-      // Compute forward bearing by comparing two points along the route
       const aheadDist = Math.max(1.0, totalDistanceMeters * 0.002);
       const aheadPos = positionAtDistance(distanceAlong + aheadDist);
       let chosenBearing = turf.bearing(
         turf.point([targetLon, targetLat]),
         turf.point([aheadPos.lon, aheadPos.lat])
       );
-
-      // Adaptive rotation smoothing based on speed
-      const baseRotTimeConstantMs = 90;
-      const speedFactor = Math.min(Math.max(currentSpeed * 1000, 0.1), 2.0); // Scale factor based on speed
+      const baseRotTimeConstantMs = 200;
+      const speedFactor = Math.min(Math.max(currentSpeed * 1000, 0.1), 2.0);
       const rotTimeConstantMs = baseRotTimeConstantMs / speedFactor;
       const alphaRot = 1 - Math.exp(-dt / rotTimeConstantMs);
-      const delta = ((chosenBearing - prevBearing + 540) % 360) - 180;
-      prevBearing += delta * alphaRot;
-
-      const smoothedCoords = [targetLon, targetLat];
-
-      // Check for accident at current position
+      let delta = chosenBearing - prevBearing;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      const dampingFactor = Math.max(0.8, 1 - Math.abs(velocity) * 0.05);
+      prevBearing += delta * alphaRot * dampingFactor;
+      const positionSmoothingFactor = 0.08;
+      const smoothedLon =
+        prevLon + (targetLon - prevLon) * positionSmoothingFactor;
+      const smoothedLat =
+        prevLat + (targetLat - prevLat) * positionSmoothingFactor;
+      prevLon = smoothedLon;
+      prevLat = smoothedLat;
+      const smoothedCoords = [smoothedLon, smoothedLat];
       if (!isInAccident && !accidentTriggered && accidents.length > 0) {
         for (const accident of accidents) {
           const distance = turf.distance(
@@ -279,14 +259,11 @@ export function createModelLayer({
             turf.point(accident.coordinates),
             { units: "meters" }
           );
-
-          // If within 10 meters of accident point, trigger accident
           if (distance <= 10) {
             isInAccident = true;
-            accidentTriggered = true; // Prevent multiple triggers
+            accidentTriggered = true;
             currentAccident = accident;
             accidentStartTime = now;
-            // Store the exact position where accident occurred
             accidentPosition = { lon: targetLon, lat: targetLat };
             if (onAccidentStart)
               onAccidentStart(id, accident, accidentStartTime);
@@ -294,15 +271,11 @@ export function createModelLayer({
           }
         }
       }
-
-      // Determine phase for status message per requirements
       let phase = null;
-      // 1) First point of route (near start of distance)
       if (distanceAlong <= 1.0 && !startedSent) {
         phase = "start";
         startedSent = true;
       }
-      // 2) Speed equals zero (emit once until moving again)
       if (!phase) {
         if (currentSpeed <= 0) {
           if (!stopSent) {
@@ -313,24 +286,19 @@ export function createModelLayer({
           stopSent = false;
         }
       }
-      // 3) End of route (wrap to start)
       if (!phase && wrapped) {
         phase = "end";
-        // Reset start flag to allow start message next lap
         startedSent = false;
       }
-      // 4) Otherwise, moving state (for UX to clear stop message)
       if (!phase && currentSpeed > 0) {
         phase = "moving";
       }
-
       if (onMove) onMove(smoothedCoords, prevBearing, phase);
       modelScene.rotation.set(
         0,
         THREE.MathUtils.degToRad(prevBearing + modelHeadingOffsetDeg),
         0
       );
-
       const modelMatrix = this.map.transform.getMatrixForModel(
         smoothedCoords,
         0
@@ -340,21 +308,14 @@ export function createModelLayer({
       );
       const l = new THREE.Matrix4().fromArray(modelMatrix);
       this.camera.projectionMatrix = m.multiply(l);
-
-      // Optimize rendering performance with frame rate limiting
       this.renderer.resetState();
-
-      // Frame rate limiting - render at most 60 FPS
-      const renderInterval = 1000 / 60; // 16.67ms for 60 FPS
+      const renderInterval = 1000 / 60;
       const timeSinceLastRender = now - lastRenderTs;
-
-      // Only render if there's significant movement or enough time has passed
       const shouldRender =
         timeSinceLastRender >= renderInterval &&
         (Math.abs(targetLon - prevLon) > 0.000001 ||
           Math.abs(targetLat - prevLat) > 0.000001 ||
           Math.abs(chosenBearing - prevBearing) > 0.1);
-
       if (shouldRender) {
         lastRenderTs = now;
         this.renderer.render(this.scene, this.camera);
