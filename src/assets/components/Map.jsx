@@ -247,7 +247,7 @@ export default function Map() {
               url: config.url,
               route: config.route,
               speed: config.speed,
-              headingOffsetDeg: -75,
+              headingOffsetDeg: -90,
               accidents: config.accidents || [],
               onAccidentStart: (modelId, accident, startTime) => {
                 dispatch(startAccident({ modelId, accident, startTime }));
@@ -345,6 +345,11 @@ export default function Map() {
           }
         }
       });
+    });
+
+    map.on("click", (e) => {
+      const { lng, lat } = e.lngLat;
+      console.log({ lng, lat });
     });
 
     return () => map.remove();

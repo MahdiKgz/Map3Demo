@@ -203,9 +203,13 @@ export function createModelLayer({
       let wrapped = false;
       if (targetProgress > 1) {
         targetProgress = targetProgress % 1;
+        smoothedProgress = targetProgress;
+        velocity = 0;
+        acceleration = 0;
         wrapped = true;
         accidentTriggered = false;
       }
+
       const progressDiff = targetProgress - smoothedProgress;
       const maxAcceleration = 0.008;
       const maxVelocity = currentSpeed * 1.5;
@@ -230,7 +234,11 @@ export function createModelLayer({
       const targetLon = pos.lon;
       const targetLat = pos.lat;
       const aheadDist = Math.max(1.0, totalDistanceMeters * 0.002);
-      const aheadPos = positionAtDistance(distanceAlong + aheadDist);
+      let aheadDistance = distanceAlong + aheadDist;
+      if (aheadDistance > totalDistanceMeters && totalDistanceMeters > 0) {
+        aheadDistance = aheadDistance % totalDistanceMeters;
+      }
+      const aheadPos = positionAtDistance(aheadDistance);
       let chosenBearing = turf.bearing(
         turf.point([targetLon, targetLat]),
         turf.point([aheadPos.lon, aheadPos.lat])
