@@ -252,7 +252,7 @@ export function createModelLayer({
       if (delta < -180) delta += 360;
       const dampingFactor = Math.max(0.8, 1 - Math.abs(velocity) * 0.05);
       prevBearing += delta * alphaRot * dampingFactor;
-      const positionSmoothingFactor = 0.08;
+      const positionSmoothingFactor = 0.06;
       const smoothedLon =
         prevLon + (targetLon - prevLon) * positionSmoothingFactor;
       const smoothedLat =

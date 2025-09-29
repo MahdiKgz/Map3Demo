@@ -227,10 +227,13 @@ export default function Map() {
                 altitude: config.altitude || 150,
                 scale: config.scale || 1.0,
                 headingOffsetDeg: 135,
-                onMove: (coords) => {
+                onMove: (coords, bearingDeg) => {
                   const now = Date.now();
                   if (chasedRef.current === config.id) {
-                    chaseCameraTo(coords, { zoom: 16 });
+                    const camOpts = { zoom: 16 };
+                    if (typeof bearingDeg === "number")
+                      camOpts.bearing = bearingDeg;
+                    chaseCameraTo(coords, camOpts);
                     if (now - lastFollowTsRef.current > 50) {
                       lastFollowTsRef.current = now;
                       dispatch(
@@ -330,14 +333,17 @@ export default function Map() {
                 tle: config.tle,
                 scale: config.scale || 1.0,
                 altitudeOffset: config.altitudeOffset || 0,
-                onMove: (coords) => {
+                onMove: (coords, bearingDeg) => {
                   const now = Date.now();
                   if (
                     chasedRef.current === config.id &&
                     now - lastFollowTsRef.current > 200
                   ) {
                     lastFollowTsRef.current = now;
-                    map.easeTo({ center: coords, zoom: 5, duration: 1000 });
+                    const opts = { center: coords, zoom: 5, duration: 1000 };
+                    if (typeof bearingDeg === "number")
+                      opts.bearing = bearingDeg;
+                    map.easeTo(opts);
                     dispatch(
                       updateChaseStatus({ lat: coords[1], lng: coords[0] })
                     );

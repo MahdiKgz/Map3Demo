@@ -6,7 +6,7 @@ const initialState = {
       id: "car-1",
       url: "/models/car.glb",
       color: "#ff0000",
-      speed: 0.0002,
+      speed: 0.0001,
       type: "vehicle",
       accidents: [
         {
@@ -34,7 +34,7 @@ const initialState = {
       id: "air-1",
       url: "/models/airplane_model.glb",
       color: "#ffaa00",
-      speed: 0.00025,
+      speed: 0.0001,
       type: "airplane",
       altitude: 100,
       scale: 0.5,
@@ -199,7 +199,7 @@ const initialState = {
       id: "moto-1",
       url: "/models/motor.glb",
       color: "#00c1ff",
-      speed: 0.0003,
+      speed: 0.0001,
       type: "vehicle",
       scale: 0.09,
       route: [

@@ -190,7 +190,7 @@ export function createAirplaneLayer({
       prevBearing += delta * alphaRot;
 
       // Adaptive position smoothing based on speed
-      const basePosTimeConstantMs = 120;
+      const basePosTimeConstantMs = 160;
       const posSpeedFactor = Math.min(Math.max(currentSpeed * 1000, 0.1), 2.0);
       const posTimeConstantMs = basePosTimeConstantMs / posSpeedFactor;
       const alphaPos = 1 - Math.exp(-dt / posTimeConstantMs);
@@ -198,7 +198,7 @@ export function createAirplaneLayer({
       prevLat = lerp(prevLat, targetLat, alphaPos);
 
       const smoothedCoords = [prevLon, prevLat];
-      if (onMove) onMove(smoothedCoords);
+      if (onMove) onMove(smoothedCoords, prevBearing);
 
       const modelMatrix = this.map.transform.getMatrixForModel(
         smoothedCoords,
