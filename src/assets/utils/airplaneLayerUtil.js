@@ -118,6 +118,8 @@ export function createAirplaneLayer({
           }
           headingResolved = true;
         }
+        // Initial one-time 90° right rotation
+        modelHeadingOffsetDeg += 90;
         this.scene.add(modelScene);
       });
 

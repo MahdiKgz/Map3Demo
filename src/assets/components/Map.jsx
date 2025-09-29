@@ -338,6 +338,9 @@ export default function Map() {
                   ) {
                     lastFollowTsRef.current = now;
                     map.easeTo({ center: coords, zoom: 5, duration: 1000 });
+                    dispatch(
+                      updateChaseStatus({ lat: coords[1], lng: coords[0] })
+                    );
                   }
                 },
               })
