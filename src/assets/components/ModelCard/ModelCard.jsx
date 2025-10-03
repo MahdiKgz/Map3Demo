@@ -55,10 +55,7 @@ function ModelCard({ model }) {
     >
       <div className="w-full flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div
-            className="w-3 h-3 rounded-full"
-            style={{ backgroundColor: model.color }}
-          />
+          <img className="w-16 h-16 rounded-lg" src={model.icon} alt="icon" />
           <h1 className="font-semibold text-white text-base">{model.id}</h1>
         </div>
         <button

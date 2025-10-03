@@ -5,6 +5,7 @@ const initialState = {
     {
       id: "car-1",
       url: "/models/car.glb",
+      icon: "/models/car-icon.png",
       color: "#ff0000",
       speed: 0.0001,
       type: "vehicle",
@@ -33,6 +34,7 @@ const initialState = {
     {
       id: "air-1",
       url: "/models/airplane_model.glb",
+      icon: "/models/airplane-icon.png",
       color: "#ffaa00",
       speed: 0.0001,
       type: "airplane",
@@ -56,6 +58,7 @@ const initialState = {
     {
       id: "sat-1",
       url: "/models/satellite.glb",
+      icon: "/models/satellite-icon.png",
       color: "#00ffaa",
       type: "satellite",
       tle: {
@@ -198,6 +201,7 @@ const initialState = {
     {
       id: "moto-1",
       url: "/models/motor.glb",
+      icon: "/models/motor-icon.png",
       color: "#00c1ff",
       speed: 0.0001,
       type: "vehicle",

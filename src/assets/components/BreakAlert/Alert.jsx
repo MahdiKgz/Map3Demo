@@ -66,7 +66,7 @@ function Alert() {
     >
       <div className="flex items-center gap-2">
         <div className="w-3 h-3 bg-red-400 rounded-full animate-pulse"></div>
-        <h3 className="font-bold text-lg">هشدار تصادف</h3>
+        <h3 className="font-bold text-lg">اعلان تصادف</h3>
       </div>
       <p className="text-sm leading-relaxed">{currentAccident.message}</p>
       <div className="flex items-center gap-2 text-xs">
