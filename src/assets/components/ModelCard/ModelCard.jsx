@@ -86,7 +86,7 @@ function ModelCard({ model }) {
             <input
               type="range"
               min="0"
-              max="10"
+              max="4"
               step="1"
               className="w-full accent-green-500 custom-range"
               value={Math.round((model.speed || 0) * 10000)}
