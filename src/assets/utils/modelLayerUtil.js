@@ -41,10 +41,12 @@ export function createModelLayer({
   let accidentPosition = null;
   let accidentTriggered = false;
 
+  // Linear interpolation between two values
   function lerp(a, b, t) {
     return a + (b - a) * t;
   }
 
+  // Check if two route arrays are different by comparing start and end points
   function routesDiffer(a, b) {
     if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length)
       return true;
@@ -57,6 +59,7 @@ export function createModelLayer({
     );
   }
 
+  // Calculate cumulative distances along the route for position interpolation
   function computeRouteDistances(r) {
     cumulativeDistances = [0];
     totalDistanceMeters = 0;
@@ -71,6 +74,7 @@ export function createModelLayer({
     }
   }
 
+  // Find exact position along route at given distance using binary search
   function positionAtDistance(distanceMeters) {
     if (
       !Array.isArray(currentRoute) ||
@@ -79,7 +83,9 @@ export function createModelLayer({
     ) {
       return { lon: prevLon, lat: prevLat, index: 0, t: 0 };
     }
+    // Clamp distance to valid range
     let d = Math.max(0, Math.min(distanceMeters, totalDistanceMeters));
+    // Binary search to find which route segment contains this distance
     let left = 0;
     let right = cumulativeDistances.length - 1;
     let i = 0;
@@ -92,6 +98,7 @@ export function createModelLayer({
         right = mid - 1;
       }
     }
+    // Calculate position within the found segment
     const segStart = cumulativeDistances[i];
     const segEnd = cumulativeDistances[i + 1] ?? totalDistanceMeters;
     const segLen = Math.max(segEnd - segStart, 1e-6);
@@ -196,11 +203,16 @@ export function createModelLayer({
           return;
         }
       }
+      // Get current speed (can be dynamic via getSpeed function or static)
       const currentSpeed =
         typeof getSpeed === "function" ? getSpeed() : speed || 0;
       const frameScale = dt / 16.67;
+
+      // Update target progress along the route (0 to 1)
       targetProgress += currentSpeed * frameScale;
       let wrapped = false;
+
+      // Handle route completion - wrap around to start for continuous movement
       if (targetProgress > 1) {
         targetProgress = targetProgress % 1;
         smoothedProgress = targetProgress;
@@ -210,10 +222,13 @@ export function createModelLayer({
         accidentTriggered = false;
       }
 
+      // Smooth progress changes to avoid jerky movement
       const progressDiff = targetProgress - smoothedProgress;
       const maxAcceleration = 0.008;
       const maxVelocity = currentSpeed * 1.5;
+
       if (Math.abs(progressDiff) > 0.0005) {
+        // Apply acceleration towards target progress
         const smoothFactor = 0.05;
         acceleration =
           Math.sign(progressDiff) *
@@ -224,34 +239,46 @@ export function createModelLayer({
         );
         smoothedProgress += velocity * frameScale;
       } else {
+        // Close to target - apply damping and snap to target
         velocity *= 0.95;
         smoothedProgress = targetProgress;
       }
+      // Convert smoothed progress to actual distance along route
       progress = smoothedProgress;
       const distanceAlong =
         totalDistanceMeters * Math.min(Math.max(progress, 0), 1);
       const pos = positionAtDistance(distanceAlong);
       const targetLon = pos.lon;
       const targetLat = pos.lat;
+
+      // Calculate look-ahead point for smooth heading calculation
       const aheadDist = Math.max(1.0, totalDistanceMeters * 0.002);
       let aheadDistance = distanceAlong + aheadDist;
       if (aheadDistance > totalDistanceMeters && totalDistanceMeters > 0) {
         aheadDistance = aheadDistance % totalDistanceMeters;
       }
       const aheadPos = positionAtDistance(aheadDistance);
+
+      // Calculate bearing from current position to look-ahead point
       let chosenBearing = turf.bearing(
         turf.point([targetLon, targetLat]),
         turf.point([aheadPos.lon, aheadPos.lat])
       );
+      // Smooth rotation changes to avoid sudden direction changes
       const baseRotTimeConstantMs = 200;
       const speedFactor = Math.min(Math.max(currentSpeed * 1000, 0.1), 2.0);
       const rotTimeConstantMs = baseRotTimeConstantMs / speedFactor;
       const alphaRot = 1 - Math.exp(-dt / rotTimeConstantMs);
+
+      // Calculate bearing difference and normalize to -180 to 180 range
       let delta = chosenBearing - prevBearing;
       if (delta > 180) delta -= 360;
       if (delta < -180) delta += 360;
+
+      // Apply damping based on velocity to reduce oscillation
       const dampingFactor = Math.max(0.8, 1 - Math.abs(velocity) * 0.05);
       prevBearing += delta * alphaRot * dampingFactor;
+      // Apply position smoothing to reduce jitter while maintaining responsiveness
       const positionSmoothingFactor = 0.06;
       const smoothedLon =
         prevLon + (targetLon - prevLon) * positionSmoothingFactor;
@@ -260,6 +287,7 @@ export function createModelLayer({
       prevLon = smoothedLon;
       prevLat = smoothedLat;
       const smoothedCoords = [smoothedLon, smoothedLat];
+      // Check for accident triggers when vehicle is near accident coordinates
       if (!isInAccident && !accidentTriggered && accidents.length > 0) {
         for (const accident of accidents) {
           const distance = turf.distance(
@@ -279,6 +307,7 @@ export function createModelLayer({
           }
         }
       }
+      // Determine movement phase for UI feedback
       let phase = null;
       if (distanceAlong <= 1.0 && !startedSent) {
         phase = "start";
@@ -301,12 +330,16 @@ export function createModelLayer({
       if (!phase && currentSpeed > 0) {
         phase = "moving";
       }
+      // Notify parent component of position and phase changes
       if (onMove) onMove(smoothedCoords, prevBearing, phase);
+
+      // Apply rotation to 3D model based on calculated bearing
       modelScene.rotation.set(
         0,
         THREE.MathUtils.degToRad(prevBearing + modelHeadingOffsetDeg),
         0
       );
+      // Calculate 3D transformation matrix for model positioning
       const modelMatrix = this.map.transform.getMatrixForModel(
         smoothedCoords,
         0
@@ -317,6 +350,8 @@ export function createModelLayer({
       const l = new THREE.Matrix4().fromArray(modelMatrix);
       this.camera.projectionMatrix = m.multiply(l);
       this.renderer.resetState();
+
+      // Optimize rendering by only updating when position or rotation changes significantly
       const renderInterval = 1000 / 60;
       const timeSinceLastRender = now - lastRenderTs;
       const shouldRender =

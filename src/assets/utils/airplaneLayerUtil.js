@@ -13,31 +13,33 @@ export function createAirplaneLayer({
   onMove,
   headingOffsetDeg,
 }) {
-  // route metrics (reserved for future use)
-  let progress = 0;
-  let modelScene = null;
-  let lastTs = 0;
-  let lastRenderTs = 0;
-  let prevLon = route?.[0]?.[0] ?? 0;
-  let prevLat = route?.[0]?.[1] ?? 0;
-  let prevBearing = 0;
+  // Airplane movement state variables
+  let progress = 0; // Progress along route (0 to 1)
+  let modelScene = null; // 3D model object
+  let lastTs = 0; // Last timestamp for frame timing
+  let lastRenderTs = 0; // Last render timestamp for FPS limiting
+  let prevLon = route?.[0]?.[0] ?? 0; // Previous longitude for smoothing
+  let prevLat = route?.[0]?.[1] ?? 0; // Previous latitude for smoothing
+  let prevBearing = 0; // Previous bearing for rotation smoothing
   let modelHeadingOffsetDeg =
     typeof headingOffsetDeg === "number" ? headingOffsetDeg : 0;
   let headingResolved = typeof headingOffsetDeg === "number";
 
+  // Linear interpolation between two values
   function lerp(a, b, t) {
     return a + (b - a) * t;
   }
 
-  // normalizeAngleDeg reserved for future orientation corrections
-
+  // Ground shadow and scanning effect meshes
   let groundMesh, scanMesh;
+  // Ground shadow material for airplane projection
   const groundMaterial = new THREE.MeshLambertMaterial({
     color: 0xf5f5f5,
     transparent: true,
     opacity: 0.1,
   });
 
+  // Animated scanning effect material using custom shaders
   const scanMaterial = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -150,13 +152,16 @@ export function createAirplaneLayer({
       const now = performance.now();
       const dt = lastTs ? now - lastTs : 16.67;
       lastTs = now;
+      // Get current speed (can be dynamic via getSpeed function or static)
       const currentSpeed =
         typeof getSpeed === "function" ? getSpeed() : speed || 0;
       const frameScale = dt / 16.67;
+
+      // Update progress along route and wrap around for continuous flight
       progress += currentSpeed * frameScale;
       if (progress > 1) progress = 0;
 
-      // محاسبه اندیس و مقدار پیشرفت بین نقاط
+      // Calculate current position between route waypoints
       const index = Math.floor(progress * (route.length - 1));
       const nextIndex = (index + 1) % route.length;
       const t = progress * (route.length - 1) - index;
@@ -164,8 +169,7 @@ export function createAirplaneLayer({
       const targetLon = lerp(route[index][0], route[nextIndex][0], t);
       const targetLat = lerp(route[index][1], route[nextIndex][1], t);
 
-      // جهت درست بین دو نقطه
-      // Compute forward bearing using a look-ahead point along route
+      // Calculate look-ahead point for smooth heading calculation
       let aheadT = t + 0.02;
       let ai = index;
       let ani = nextIndex;
@@ -176,20 +180,24 @@ export function createAirplaneLayer({
       }
       const aheadLon = lerp(route[ai][0], route[ani][0], aheadT);
       const aheadLat = lerp(route[ai][1], route[ani][1], aheadT);
+
+      // Calculate bearing from current position to look-ahead point
       let chosenBearing = turf.bearing(
         turf.point([targetLon, targetLat]),
         turf.point([aheadLon, aheadLat])
       );
 
-      // Adaptive rotation smoothing based on speed
+      // Smooth rotation changes based on speed to avoid sudden direction changes
       const baseRotTimeConstantMs = 90;
       const speedFactor = Math.min(Math.max(currentSpeed * 1000, 0.1), 2.0);
       const rotTimeConstantMs = baseRotTimeConstantMs / speedFactor;
       const alphaRot = 1 - Math.exp(-dt / rotTimeConstantMs);
+
+      // Normalize bearing difference to -180 to 180 range
       const delta = ((chosenBearing - prevBearing + 540) % 360) - 180;
       prevBearing += delta * alphaRot;
 
-      // Adaptive position smoothing based on speed
+      // Smooth position changes based on speed for fluid movement
       const basePosTimeConstantMs = 160;
       const posSpeedFactor = Math.min(Math.max(currentSpeed * 1000, 0.1), 2.0);
       const posTimeConstantMs = basePosTimeConstantMs / posSpeedFactor;
@@ -198,8 +206,10 @@ export function createAirplaneLayer({
       prevLat = lerp(prevLat, targetLat, alphaPos);
 
       const smoothedCoords = [prevLon, prevLat];
+      // Notify parent component of position changes
       if (onMove) onMove(smoothedCoords, prevBearing);
 
+      // Calculate 3D transformation matrix for airplane positioning
       const modelMatrix = this.map.transform.getMatrixForModel(
         smoothedCoords,
         0
@@ -210,12 +220,15 @@ export function createAirplaneLayer({
       const l = new THREE.Matrix4().fromArray(modelMatrix);
       this.camera.projectionMatrix = m.multiply(l);
 
+      // Apply rotation to 3D model based on calculated bearing
       if (modelScene)
         modelScene.rotation.set(
           0,
           THREE.MathUtils.degToRad(prevBearing + modelHeadingOffsetDeg),
           0
         );
+
+      // Update ground shadow and scanning effect positions
       if (groundMesh) groundMesh.position.set(0, 0.1, 0);
       if (scanMesh) {
         scanMesh.position.set(0, 0.11, 0);

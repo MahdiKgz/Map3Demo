@@ -13,18 +13,20 @@ export function createSatelliteLayer({
   trackStepSec = 20,
   onMove,
 }) {
-  let modelScene = null;
-  let lastTrackUpdate = 0;
-  let lastTs = 0;
-  let prevLon = null;
-  let prevLat = null;
-  let prevBearingDeg = 0;
+  // Satellite movement state variables
+  let modelScene = null; // 3D model object
+  let lastTrackUpdate = 0; // Last track line update timestamp
+  let lastTs = 0; // Last timestamp for frame timing
+  let prevLon = null; // Previous longitude for smoothing
+  let prevLat = null; // Previous latitude for smoothing
+  let prevBearingDeg = 0; // Previous bearing for rotation smoothing
 
+  // Linear interpolation between two values
   function lerp(a, b, t) {
     return a + (b - a) * t;
   }
 
-  // Compute initial bearing from point A to B (lon/lat in degrees)
+  // Calculate bearing between two geographic points using spherical geometry
   function computeBearingDeg(lon1, lat1, lon2, lat2) {
     const toRad = (d) => (d * Math.PI) / 180;
     const toDeg = (r) => (r * 180) / Math.PI;
@@ -41,7 +43,7 @@ export function createSatelliteLayer({
     return brng;
   }
 
-  // Precompute satrec
+  // Parse TLE (Two-Line Element) data for satellite orbital calculations
   const satrec = satellite.twoline2satrec(tle.line1, tle.line2);
 
   return {
@@ -100,17 +102,19 @@ export function createSatelliteLayer({
       const dt = lastTs ? nowPerf - lastTs : 16.67;
       lastTs = nowPerf;
 
+      // Calculate satellite position using orbital mechanics
       const now = new Date();
-      const gmst = satellite.gstime(now);
+      const gmst = satellite.gstime(now); // Greenwich Mean Sidereal Time
       const positionAndVelocity = satellite.propagate(satrec, now);
       const positionEci = positionAndVelocity.position;
       if (!positionEci) return;
 
+      // Convert from ECI (Earth-Centered Inertial) to geodetic coordinates
       const positionGd = satellite.eciToGeodetic(positionEci, gmst);
       const longitude = satellite.degreesLong(positionGd.longitude);
       const latitude = satellite.degreesLat(positionGd.latitude);
 
-      // Ground projection with smoothing for map and local altitude
+      // Apply position smoothing to reduce jitter in satellite movement
       if (prevLon === null || prevLat === null) {
         prevLon = longitude;
         prevLat = latitude;
@@ -121,9 +125,10 @@ export function createSatelliteLayer({
         prevLat = lerp(prevLat, latitude, alphaPos);
       }
       const coords = [prevLon, prevLat];
+      // Notify parent component of position changes
       if (onMove) onMove(coords, prevBearingDeg);
 
-      // Forward-looking point to estimate heading (1s ahead)
+      // Calculate look-ahead position for smooth heading calculation
       const aheadDate = new Date(now.getTime() + 1000);
       const gmstAhead = satellite.gstime(aheadDate);
       const pvAhead = satellite.propagate(satrec, aheadDate);
@@ -140,7 +145,7 @@ export function createSatelliteLayer({
         );
       }
 
-      // Smooth rotation similar to ground/air models
+      // Smooth rotation changes to avoid sudden direction changes
       const baseRotTimeConstantMs = 300;
       const alphaRot = 1 - Math.exp(-dt / baseRotTimeConstantMs);
       let delta = targetBearingDeg - prevBearingDeg;
@@ -148,6 +153,7 @@ export function createSatelliteLayer({
       if (delta < -180) delta += 360;
       prevBearingDeg += delta * alphaRot;
 
+      // Calculate 3D transformation matrix for satellite positioning
       const modelMatrix = this.map.transform.getMatrixForModel(coords, 0);
       const m = new THREE.Matrix4().fromArray(
         args.defaultProjectionData.mainMatrix
@@ -155,16 +161,17 @@ export function createSatelliteLayer({
       const l = new THREE.Matrix4().fromArray(modelMatrix);
       this.camera.projectionMatrix = m.multiply(l);
 
-      // Place satellite above ground by altitudeOffset meters and set yaw
+      // Position satellite model with altitude offset and apply rotation
       modelScene.position.set(0, altitudeOffset, 0);
       modelScene.rotation.set(0, THREE.MathUtils.degToRad(prevBearingDeg), 0);
 
-      // Update track line at ~1 Hz
+      // Update orbital track line visualization at 1Hz frequency
       const tNow = performance.now();
       if (!lastTrackUpdate || tNow - lastTrackUpdate > 1000) {
         lastTrackUpdate = tNow;
         const coordsArr = [];
         const startMs = now.getTime();
+        // Generate track points for the specified duration
         for (let t = 0; t <= trackDurationSec; t += trackStepSec) {
           const date = new Date(startMs + t * 1000);
           const gmstT = satellite.gstime(date);
@@ -175,6 +182,7 @@ export function createSatelliteLayer({
           const lat = satellite.degreesLat(gd.latitude);
           coordsArr.push([lon, lat]);
         }
+        // Update the track line on the map
         const src = this.map.getSource(`sat-track-${id}`);
         if (src) {
           src.setData({
