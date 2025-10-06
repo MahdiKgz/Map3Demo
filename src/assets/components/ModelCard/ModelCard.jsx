@@ -6,6 +6,10 @@ import {
   setChasedModel,
 } from "../../redux/slices/models.slice";
 import { setChasedModelId } from "../../redux/slices/chase.slice";
+import CarIcon from "../../icons/CarIcon";
+import MotorIcon from "../../icons/MotorIcon";
+import SatelliteIcon from "../../icons/SatelliteIcon";
+import AirplaneIcon from "../../icons/AirplaneIcon";
 
 function ModelCard({ model }) {
   const dispatch = useDispatch();
@@ -55,7 +59,16 @@ function ModelCard({ model }) {
     >
       <div className="w-full flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <img className="w-16 h-16 rounded-lg" src={model.icon} alt="icon" />
+          {model.type === "vehicle" && model.url?.includes("car") && (
+            <CarIcon className="w-10 h-10" />
+          )}
+          {model.type === "vehicle" && model.url?.includes("motor") && (
+            <MotorIcon className="w-10 h-10" />
+          )}
+          {model.type === "airplane" && <AirplaneIcon className="w-10 h-10" />}
+          {model.type === "satellite" && (
+            <SatelliteIcon className="w-10 h-10" />
+          )}
           <h1 className="font-semibold text-white text-base">{model.id}</h1>
         </div>
         <button
