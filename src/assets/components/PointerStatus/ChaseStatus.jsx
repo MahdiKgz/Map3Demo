@@ -54,7 +54,7 @@ function ChaseStatus() {
       </div>
       <div className="text-sm mt-1 flex flex-col items-start">
         موقعیت لحظه ای :
-        <span>
+        <span dir="ltr">
           ({lat?.toFixed?.(6) ?? "0.000000"}, {lng?.toFixed?.(6) ?? "0.000000"})
         </span>
       </div>

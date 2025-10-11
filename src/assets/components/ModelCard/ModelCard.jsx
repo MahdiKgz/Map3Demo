@@ -10,6 +10,7 @@ import CarIcon from "../../icons/CarIcon";
 import MotorIcon from "../../icons/MotorIcon";
 import SatelliteIcon from "../../icons/SatelliteIcon";
 import AirplaneIcon from "../../icons/AirplaneIcon";
+import { getSpeedFromTLE } from "../../utils/extractSppedTLE";
 
 function ModelCard({ model }) {
   const dispatch = useDispatch();
@@ -45,6 +46,18 @@ function ModelCard({ model }) {
     dispatch(setChasedModel(next));
     dispatch(setChasedModelId(next));
   };
+
+  // ⚡ محاسبه سرعت اولیه ماهواره از TLE
+  useEffect(() => {
+    if (
+      model.type === "satellite" &&
+      (model.speed === undefined || model.speed === null) &&
+      model.tle
+    ) {
+      const speed = getSpeedFromTLE(model.tle.line1, model.tle.line2);
+      dispatch(updateModelSpeed({ id: model.id, speed }));
+    }
+  }, [model, dispatch]);
 
   return (
     <div
@@ -91,28 +104,35 @@ function ModelCard({ model }) {
         ref={detailsRef}
         className="w-full mt-1 flex flex-col items-start gap-4 bg-gray-600/50 rounded p-3 text-gray-100"
       >
-        {model.type !== "satellite" && (
-          <div className="w-full flex flex-col items-start gap-1">
-            <label className="text-sm">
-              سرعت: {Math.round((model.speed || 0) * 10000)}
-            </label>
-            <input
-              type="range"
-              min="0"
-              max="4"
-              step="1"
-              className="w-full accent-green-500 custom-range"
-              value={Math.round((model.speed || 0) * 10000)}
-              onChange={(e) => {
-                e.stopPropagation();
-                const v = Number(e.target.value);
-                const newSpeed = v === 0 ? 0 : (v / 10) * 0.001;
-                dispatch(updateModelSpeed({ id: model.id, speed: newSpeed }));
-              }}
-              onClick={(e) => e.stopPropagation()}
-            />
-          </div>
-        )}
+        <div className="w-full flex flex-col items-start gap-1">
+          <label className="text-sm">
+            سرعت:{" "}
+            {model.type === "satellite"
+              ? `${Math.round(model.speed || 0)}`
+              : `${(model.speed || 0).toFixed(5)}`}
+          </label>
+
+          <input
+            type="range"
+            min={model.type === "satellite" ? 7000 : 0}
+            max={model.type === "satellite" ? 8000 : 4}
+            step={model.type === "satellite" ? 10 : 1}
+            className="w-full accent-green-500 custom-range"
+            value={
+              model.type === "satellite"
+                ? Math.round(model.speed || 0)
+                : Math.round((model.speed || 0) * 10000)
+            }
+            onChange={(e) => {
+              e.stopPropagation();
+              const v = Number(e.target.value);
+              const newSpeed =
+                model.type === "satellite" ? v : v === 0 ? 0 : (v / 10) * 0.001;
+              dispatch(updateModelSpeed({ id: model.id, speed: newSpeed }));
+            }}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
       </div>
     </div>
   );
